@@ -15,7 +15,6 @@ trait AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> AsyncReadWrite for T {}
 
 struct Inner {
-    #[allow(dead_code)]
     child: Child,
     writer: tokio::io::WriteHalf<Box<dyn AsyncReadWrite>>,
 }
@@ -23,6 +22,19 @@ struct Inner {
 #[derive(Default)]
 pub struct MpvState {
     inner: Arc<Mutex<Option<Inner>>>,
+}
+
+/// Kills the mpv child process, if any, without needing an async context.
+/// Tauri's shutdown path (`RunEvent::Exit`) is synchronous and typically ends
+/// in `std::process::exit`, which skips Drop impls - so `kill_on_drop` on the
+/// child alone is not enough to guarantee mpv (and its open stream
+/// connection) is torn down when the app quits.
+pub fn kill_on_exit(state: &MpvState) {
+    if let Ok(mut guard) = state.inner.try_lock() {
+        if let Some(inner) = guard.as_mut() {
+            let _ = inner.child.start_kill();
+        }
+    }
 }
 
 #[cfg(unix)]
