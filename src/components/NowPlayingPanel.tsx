@@ -7,7 +7,7 @@ const STATUS_LABEL: Record<string, string> = {
   idle: 'Select a channel to start listening',
   loading: 'Connecting…',
   playing: 'Playing',
-  paused: 'Paused',
+  stopped: 'Stopped',
   error: 'Playback error',
 };
 

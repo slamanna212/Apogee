@@ -12,7 +12,7 @@ pub fn run() {
     .manage(mpv::MpvState::default())
     .invoke_handler(tauri::generate_handler![
       mpv::mpv_load,
-      mpv::mpv_set_pause,
+      mpv::mpv_stop,
       mpv::mpv_set_volume,
       mpv::mpv_get_property,
       secrets::secrets_set,

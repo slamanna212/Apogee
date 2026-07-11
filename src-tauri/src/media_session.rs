@@ -85,7 +85,7 @@ pub fn media_session_set_playback(
     let playback = if playing {
       MediaPlayback::Playing { progress: None }
     } else {
-      MediaPlayback::Paused { progress: None }
+      MediaPlayback::Stopped
     };
     controls.set_playback(playback).map_err(|e| e.to_string())?;
   }

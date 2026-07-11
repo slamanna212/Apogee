@@ -16,8 +16,8 @@ export function loadUrl(url: string): Promise<void> {
   return invoke('mpv_load', { url });
 }
 
-export function setPause(paused: boolean): Promise<void> {
-  return invoke('mpv_set_pause', { paused });
+export function stopPlayback(): Promise<void> {
+  return invoke('mpv_stop');
 }
 
 export function setVolume(volume: number): Promise<void> {

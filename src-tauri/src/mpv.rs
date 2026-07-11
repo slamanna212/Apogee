@@ -115,8 +115,8 @@ pub async fn mpv_load(app: AppHandle, state: State<'_, MpvState>, url: String) -
 }
 
 #[tauri::command]
-pub async fn mpv_set_pause(state: State<'_, MpvState>, paused: bool) -> Result<(), String> {
-    send_command(&state, json!({ "command": ["set_property", "pause", paused] })).await
+pub async fn mpv_stop(state: State<'_, MpvState>) -> Result<(), String> {
+    send_command(&state, json!({ "command": ["stop"] })).await
 }
 
 #[tauri::command]
