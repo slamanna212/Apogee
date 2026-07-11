@@ -217,7 +217,7 @@ function VolumeControl({ volume, onChange }: { volume: number; onChange: (v: num
           🔊
         </div>
       </Popover.Target>
-      <Popover.Dropdown className="pulsar-glass" style={{ borderRadius: 20, padding: '14px 0' }}>
+      <Popover.Dropdown className="apogee-glass" style={{ borderRadius: 20, padding: '14px 0' }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, width: 36 }}>
           <Text size="xs" fw={600} c="dimmed">
             {volume}%
@@ -378,7 +378,7 @@ export function TransportBar({
     const artwork = nowPlaying?.artwork_url || currentChannel?.stream_icon;
     return (
       <div
-        className="pulsar-glass"
+        className="apogee-glass"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -402,7 +402,7 @@ export function TransportBar({
 
   return (
     <div
-      className="pulsar-glass"
+      className="apogee-glass"
       style={{
         display: 'flex',
         alignItems: 'center',

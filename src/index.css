@@ -54,7 +54,7 @@ body,
   }
 }
 
-.pulsar-starfield {
+.apogee-starfield {
   position: fixed;
   inset: 0;
   z-index: 0;
@@ -62,8 +62,8 @@ body,
   pointer-events: none;
 }
 
-.pulsar-starfield::before,
-.pulsar-starfield::after {
+.apogee-starfield::before,
+.apogee-starfield::after {
   content: '';
   position: absolute;
   border-radius: 50%;
@@ -71,7 +71,7 @@ body,
   animation: floaty 16s ease-in-out infinite;
 }
 
-.pulsar-starfield::before {
+.apogee-starfield::before {
   top: -260px;
   left: -200px;
   width: 640px;
@@ -79,7 +79,7 @@ body,
   background: radial-gradient(circle at 35% 35%, rgba(139, 107, 255, 0.5), rgba(139, 107, 255, 0) 70%);
 }
 
-.pulsar-starfield::after {
+.apogee-starfield::after {
   top: 420px;
   right: -260px;
   width: 560px;
@@ -89,7 +89,7 @@ body,
   animation-delay: 2s;
 }
 
-.pulsar-starfield-dots {
+.apogee-starfield-dots {
   position: absolute;
   inset: 0;
   background-image: radial-gradient(1px 1px at 20px 30px, rgba(255, 255, 255, 0.5) 1px, transparent 0),
@@ -102,11 +102,11 @@ body,
   opacity: 0.5;
 }
 
-[data-mantine-color-scheme='light'] .pulsar-starfield-dots {
+[data-mantine-color-scheme='light'] .apogee-starfield-dots {
   opacity: 0;
 }
 
-.pulsar-glass {
+.apogee-glass {
   background: var(--app-glass-bg);
   border: 1px solid var(--app-border);
   backdrop-filter: blur(24px);

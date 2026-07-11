@@ -26,8 +26,8 @@ pub fn init(app: &AppHandle) -> Result<MediaControls, String> {
   let hwnd: Option<*mut std::ffi::c_void> = None;
 
   let config = PlatformConfig {
-    display_name: "Pulsar",
-    dbus_name: "pulsar",
+    display_name: "Apogee",
+    dbus_name: "apogee",
     hwnd,
   };
 

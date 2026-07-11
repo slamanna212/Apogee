@@ -1,6 +1,6 @@
 use keyring::{Entry, Error};
 
-const SERVICE: &str = "com.slamanna.pulsar";
+const SERVICE: &str = "com.slamanna.apogee";
 
 fn entry(key: &str) -> Result<Entry, String> {
   Entry::new(SERVICE, key).map_err(|e| e.to_string())

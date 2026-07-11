@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Pulsar is a Tauri (Rust + React/TypeScript) desktop app that acts as a radio tuner against an Xtream Codes IPTV backend, scoped to a single live-channel category (SiriusXM channels). It plays streams via a locally spawned `mpv` process and overlays now-playing metadata (song/artist) from the StellarTunerLog API by fuzzy-matching Xtream channel names to StellarTunerLog station names.
+Apogee is a Tauri (Rust + React/TypeScript) desktop app that acts as a radio tuner against an Xtream Codes IPTV backend, scoped to a single live-channel category (SiriusXM channels). It plays streams via a locally spawned `mpv` process and overlays now-playing metadata (song/artist) from the StellarTunerLog API by fuzzy-matching Xtream channel names to StellarTunerLog station names.
 
 ## Commands
 
@@ -17,7 +17,7 @@ Pulsar is a Tauri (Rust + React/TypeScript) desktop app that acts as a radio tun
 
 There is no test suite (no test runner configured in `package.json`, no `#[test]` usage found) and no `npm test` script — don't assume one exists.
 
-Requires the `mpv` binary on `PATH` at runtime; the Rust side spawns it as a subprocess and talks to it over a local IPC socket (`/tmp/pulsar-mpv.sock` on Unix, a named pipe on Windows).
+Requires the `mpv` binary on `PATH` at runtime; the Rust side spawns it as a subprocess and talks to it over a local IPC socket (`/tmp/apogee-mpv.sock` on Unix, a named pipe on Windows).
 
 ## Architecture
 

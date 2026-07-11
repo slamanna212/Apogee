@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Pulsar",
+  "productName": "Apogee",
   "version": "0.1.0",
-  "identifier": "com.slamanna.pulsar",
+  "identifier": "com.slamanna.apogee",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Pulsar",
+        "title": "Apogee",
         "width": 1180,
         "height": 860,
         "minWidth": 300,

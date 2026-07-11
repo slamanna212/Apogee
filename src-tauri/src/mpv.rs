@@ -7,9 +7,9 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 #[cfg(unix)]
-const IPC_PATH: &str = "/tmp/pulsar-mpv.sock";
+const IPC_PATH: &str = "/tmp/apogee-mpv.sock";
 #[cfg(windows)]
-const IPC_PATH: &str = r"\\.\pipe\pulsar-mpv";
+const IPC_PATH: &str = r"\\.\pipe\apogee-mpv";
 
 trait AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> AsyncReadWrite for T {}
