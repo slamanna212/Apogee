@@ -33,9 +33,15 @@ export interface StellarChannelCategory {
   is_primary: boolean;
 }
 
+export interface StellarChannelLogo {
+  url: string;
+  width: number;
+  height: number;
+}
+
 export interface StellarChannelLogos {
-  color_dark_square?: string;
-  [key: string]: string | undefined;
+  color_dark_square?: StellarChannelLogo;
+  [key: string]: StellarChannelLogo | undefined;
 }
 
 export interface StellarChannel {

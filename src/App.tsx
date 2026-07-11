@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { MantineProvider } from '@mantine/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { primaryMonitor } from '@tauri-apps/api/window';
@@ -178,6 +178,32 @@ function AppContent() {
     void applyWindowState(browserOpen, barMode);
   }, [browserOpen, barMode]);
 
+  const windowStateRef = useRef({ browserOpen, barMode });
+  useEffect(() => {
+    windowStateRef.current = { browserOpen, barMode };
+  }, [browserOpen, barMode]);
+
+  useEffect(() => {
+    // On Linux, undecorated/transparent windows sometimes get left at the
+    // wrong OS size/position after being minimized and restored (a GTK/WM
+    // quirk, not something the app's own state tracks). Regaining focus is
+    // a reliable signal that the window just came back, so re-assert the
+    // size/position for the current mode at that point.
+    const win = getCurrentWebviewWindow();
+    let unlisten: (() => void) | undefined;
+    win
+      .onFocusChanged(async ({ payload: focused }) => {
+        if (!focused) return;
+        if (await win.isMinimized()) return;
+        const { browserOpen, barMode } = windowStateRef.current;
+        void applyWindowState(browserOpen, barMode);
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
+    return () => unlisten?.();
+  }, []);
+
   useEffect(() => {
     function handleResize() {
       setCompact(window.innerWidth < COMPACT_BREAKPOINT);
@@ -325,15 +351,32 @@ function AppContent() {
   );
 }
 
+function useSystemColorScheme(): 'light' | 'dark' {
+  const [scheme, setScheme] = useState<'light' | 'dark'>(() =>
+    window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+  );
+
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = (e: MediaQueryListEvent) => setScheme(e.matches ? 'dark' : 'light');
+    query.addEventListener('change', handler);
+    return () => query.removeEventListener('change', handler);
+  }, []);
+
+  return scheme;
+}
+
 function App() {
   const themeMode = useLibraryStore((s) => s.themeMode);
+  const systemScheme = useSystemColorScheme();
+  const resolvedScheme = themeMode === 'system' ? systemScheme : themeMode;
 
   useEffect(() => {
     document.body.style.background = 'transparent';
   }, []);
 
   return (
-    <MantineProvider theme={theme} cssVariablesResolver={cssVariablesResolver} forceColorScheme={themeMode}>
+    <MantineProvider theme={theme} cssVariablesResolver={cssVariablesResolver} forceColorScheme={resolvedScheme}>
       <AppContent />
     </MantineProvider>
   );

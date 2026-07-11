@@ -1,9 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Group, NumberInput, PasswordInput, Select, Slider, Text, TextInput } from '@mantine/core';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useLibraryStore } from '../stores/libraryStore';
+import { useLibraryStore, type ThemeMode } from '../stores/libraryStore';
 import { getLiveCategories } from '../lib/xtream';
 import type { XtreamCategory } from '../types/xtream';
+
+const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
+  { value: 'system', label: 'System default' },
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+];
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -134,27 +140,13 @@ export function Settings() {
         </Card>
 
         <Card title="Appearance">
-          <Group>
-            {(['dark', 'light'] as const).map((mode) => (
-              <div
-                key={mode}
-                onClick={() => setThemeMode(mode)}
-                role="button"
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: 10,
-                  cursor: 'pointer',
-                  textTransform: 'capitalize',
-                  background: themeMode === mode ? 'var(--app-accent)' : 'var(--app-panel2)',
-                  color: themeMode === mode ? '#07060d' : 'var(--app-text)',
-                  border: '1px solid var(--app-border)',
-                  font: '600 13px "Sora", sans-serif',
-                }}
-              >
-                {mode}
-              </div>
-            ))}
-          </Group>
+          <Select
+            label="Theme"
+            data={THEME_OPTIONS}
+            value={themeMode}
+            onChange={(v) => setThemeMode((v as ThemeMode) ?? 'system')}
+            allowDeselect={false}
+          />
         </Card>
 
         <Group justify="flex-end">

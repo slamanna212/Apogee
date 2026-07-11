@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { load, type Store } from '@tauri-apps/plugin-store';
 
 export type SortMode = 'az' | 'channel_number';
-export type ThemeMode = 'dark' | 'light';
+export type ThemeMode = 'system' | 'dark' | 'light';
 
 interface PersistedLibrary {
   favorites: number[];
@@ -15,7 +15,7 @@ const DEFAULT_LIBRARY: PersistedLibrary = {
   favorites: [],
   recentlyPlayed: [],
   sortMode: 'az',
-  themeMode: 'dark',
+  themeMode: 'system',
 };
 
 interface LibraryState extends PersistedLibrary {

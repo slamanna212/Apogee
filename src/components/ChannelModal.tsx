@@ -61,7 +61,7 @@ export function ChannelModal({ channel, metadata, apiKey, onClose }: ChannelModa
     metadata?.email && { Icon: IconMail, href: `mailto:${metadata.email}` },
     metadata?.phone && { Icon: IconPhone, href: `tel:${metadata.phone}` },
   ].filter((s): s is { Icon: typeof IconMail; href: string } => Boolean(s));
-  const backdrop = metadata?.logos?.color_dark_square || channel.stream_icon;
+  const backdrop = metadata?.logos?.color_dark_square?.url || channel.stream_icon;
 
   return (
     <Modal opened onClose={onClose} withCloseButton={false} size="1100px" radius={26} padding={0} centered>

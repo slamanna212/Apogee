@@ -33,7 +33,7 @@ export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, o
   const [hovered, setHovered] = useState(false);
   const name = metadata?.marketing_name || channel.name;
   const number = metadata?.channel_number ?? channel.num;
-  const logoUrl = metadata?.logos?.color_dark_square || channel.stream_icon;
+  const logoUrl = metadata?.logos?.color_dark_square?.url || channel.stream_icon;
   const background = metadata?.dark_bg_color || hashGradient(channel.name);
 
   return (
@@ -66,7 +66,7 @@ export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, o
             objectFit: 'cover',
             filter: 'blur(18px)',
             transform: 'scale(1.2)',
-            opacity: 0.9,
+            opacity: 0.6,
           }}
         />
       )}
@@ -92,24 +92,70 @@ export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, o
           color: '#fff',
           opacity: isFavorite || hovered ? 1 : 0,
           transition: 'opacity 150ms',
+          zIndex: 1,
         }}
       >
         {isFavorite ? <IconStarFilled size={14} /> : <IconStar size={14} />}
       </div>
-      <div
+      <span
         style={{
           position: 'absolute',
-          bottom: 0,
+          top: 12,
           left: 0,
           right: 0,
-          padding: 10,
-          background: 'linear-gradient(0deg, rgba(0,0,0,.55), transparent)',
-          font: '600 12px "Space Grotesk", sans-serif',
-          color: '#fff',
+          textAlign: 'center',
+          font: '700 15px "Space Grotesk", sans-serif',
+          color: 'rgba(255,255,255,.85)',
+          letterSpacing: 0.5,
+          textShadow: '0 1px 4px rgba(0,0,0,.5)',
         }}
       >
-        {name} <span style={{ opacity: 0.6, fontWeight: 400 }}>{number}</span>
-      </div>
+        {number}
+      </span>
+      {logoUrl ? (
+        <img
+          src={logoUrl}
+          alt=""
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: '80%',
+            aspectRatio: '1',
+            objectFit: 'contain',
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: '80%',
+            aspectRatio: '1',
+            borderRadius: 10,
+            background: 'rgba(255,255,255,.12)',
+          }}
+        />
+      )}
+      <span
+        style={{
+          position: 'absolute',
+          bottom: 10,
+          left: 0,
+          right: 0,
+          padding: '0 8px',
+          textAlign: 'center',
+          font: '600 12px "Space Grotesk", sans-serif',
+          color: '#fff',
+          textShadow: '0 1px 4px rgba(0,0,0,.5)',
+          lineHeight: 1.25,
+        }}
+      >
+        {name}
+      </span>
     </div>
   );
 }
