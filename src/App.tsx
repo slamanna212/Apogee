@@ -2,19 +2,28 @@ import { useEffect, useState } from 'react';
 import { ActionIcon, AppShell, Group, MantineProvider, Text, Title } from '@mantine/core';
 import { useSettingsStore } from './stores/settingsStore';
 import { useChannelStore } from './stores/channelStore';
+import { usePlayerStore } from './stores/playerStore';
 import { ChannelList } from './components/ChannelList';
 import { SettingsModal } from './components/SettingsModal';
-import type { XtreamChannel } from './types/xtream';
+import { NowPlayingPanel } from './components/NowPlayingPanel';
 
 function AppShellContent() {
   const { settings, loaded, load } = useSettingsStore();
   const { channels, status, error, fetchChannels } = useChannelStore();
+  const { currentChannel, selectChannel, initEventListener } = usePlayerStore();
   const [settingsOpened, setSettingsOpened] = useState(false);
-  const [activeChannel, setActiveChannel] = useState<XtreamChannel | null>(null);
 
   useEffect(() => {
     load();
-  }, [load]);
+    initEventListener();
+  }, [load, initEventListener]);
+
+  useEffect(() => {
+    if (loaded) {
+      usePlayerStore.setState({ volume: settings.defaultVolume });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
 
   useEffect(() => {
     if (loaded && settings.baseUrl && settings.username && settings.categoryId) {
@@ -44,17 +53,19 @@ function AppShellContent() {
           channels={channels}
           status={status}
           error={error}
-          activeStreamId={activeChannel?.stream_id ?? null}
-          onSelect={setActiveChannel}
+          activeStreamId={currentChannel?.stream_id ?? null}
+          onSelect={(channel) =>
+            selectChannel(
+              channel,
+              { baseUrl: settings.baseUrl, username: settings.username, password: settings.password },
+              settings.streamExtension,
+            )
+          }
         />
       </AppShell.Navbar>
 
       <AppShell.Main>
-        {activeChannel ? (
-          <Text>{activeChannel.name}</Text>
-        ) : (
-          <Text c="dimmed">Now-playing panel and transport controls will render here.</Text>
-        )}
+        <NowPlayingPanel />
       </AppShell.Main>
 
       <SettingsModal opened={settingsOpened} onClose={() => setSettingsOpened(false)} />

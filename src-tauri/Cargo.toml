@@ -25,3 +25,4 @@ tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-http = "2"
 tauri-plugin-store = "2"
+tokio = { version = "1", features = ["process", "net", "io-util", "rt", "time", "macros"] }
