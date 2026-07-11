@@ -7,9 +7,10 @@ import type { XtreamChannel } from '../types/xtream';
 
 interface RecentProps {
   onSelectChannel: (streamId: number) => void;
+  onPlayChannel: (streamId: number) => void;
 }
 
-export function Recent({ onSelectChannel }: RecentProps) {
+export function Recent({ onSelectChannel, onPlayChannel }: RecentProps) {
   const allChannels = useChannelStore((s) => s.channels);
   const channelMetadata = useChannelStore((s) => s.channelMetadata);
   const favorites = useLibraryStore((s) => s.favorites);
@@ -32,6 +33,7 @@ export function Recent({ onSelectChannel }: RecentProps) {
       favorites={favorites}
       onToggleFavorite={toggleFavorite}
       onSelect={onSelectChannel}
+      onPlay={onPlayChannel}
       emptyState={<Text c="dimmed">Nothing played yet.</Text>}
     />
   );

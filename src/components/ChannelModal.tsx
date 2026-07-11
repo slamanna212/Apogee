@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Modal, Text } from '@mantine/core';
-import { IconBrandFacebook, IconBrandTwitter, IconMail, IconPhone } from '@tabler/icons-react';
+import { IconBrandFacebook, IconBrandTwitter, IconMail, IconPhone, IconStar, IconStarFilled } from '@tabler/icons-react';
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel, StellarHistoryEntry } from '../types/stellarTunerLog';
 import { getHistory } from '../lib/stellarTunerLog';
@@ -9,12 +9,14 @@ interface ChannelModalProps {
   channel: XtreamChannel;
   metadata?: StellarChannel;
   apiKey: string;
+  isFavorite: boolean;
+  onToggleFavorite: () => void;
   onClose: () => void;
 }
 
 const BATCH_SIZE = 10;
 
-export function ChannelModal({ channel, metadata, apiKey, onClose }: ChannelModalProps) {
+export function ChannelModal({ channel, metadata, apiKey, isFavorite, onToggleFavorite, onClose }: ChannelModalProps) {
   const [history, setHistory] = useState<StellarHistoryEntry[]>([]);
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -75,7 +77,25 @@ export function ChannelModal({ channel, metadata, apiKey, onClose }: ChannelModa
             />
           )}
           <div style={{ position: 'absolute', inset: 0, background: 'rgba(7,6,13,.5)' }} />
-          <div style={{ position: 'relative', display: 'flex', justifyContent: 'flex-end' }}>
+          <div style={{ position: 'relative', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+            <div
+              onClick={onToggleFavorite}
+              role="button"
+              aria-label={isFavorite ? 'Remove favorite' : 'Add favorite'}
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: '50%',
+                background: 'rgba(255,255,255,.1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                color: isFavorite ? 'var(--app-accent)' : '#fff',
+              }}
+            >
+              {isFavorite ? <IconStarFilled size={15} /> : <IconStar size={15} />}
+            </div>
             <div
               onClick={onClose}
               role="button"

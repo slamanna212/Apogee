@@ -4,9 +4,10 @@ import { ChannelGrid } from '../components/ChannelGrid';
 
 interface ChannelsProps {
   onSelectChannel: (streamId: number) => void;
+  onPlayChannel: (streamId: number) => void;
 }
 
-export function Channels({ onSelectChannel }: ChannelsProps) {
+export function Channels({ onSelectChannel, onPlayChannel }: ChannelsProps) {
   const channels = useChannelStore((s) => s.channels);
   const channelMetadata = useChannelStore((s) => s.channelMetadata);
   const favorites = useLibraryStore((s) => s.favorites);
@@ -24,6 +25,7 @@ export function Channels({ onSelectChannel }: ChannelsProps) {
       onSortModeChange={setSortMode}
       onToggleFavorite={toggleFavorite}
       onSelect={onSelectChannel}
+      onPlay={onPlayChannel}
     />
   );
 }

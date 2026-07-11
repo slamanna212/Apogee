@@ -14,9 +14,10 @@ interface RowProps {
   favorites: number[];
   onToggleFavorite: (streamId: number) => void;
   onSelect: (streamId: number) => void;
+  onPlay: (streamId: number) => void;
 }
 
-function Row({ title, subtitle, channels, channelMetadata, favorites, onToggleFavorite, onSelect }: RowProps) {
+function Row({ title, subtitle, channels, channelMetadata, favorites, onToggleFavorite, onSelect, onPlay }: RowProps) {
   if (channels.length === 0) return null;
   return (
     <div style={{ marginBottom: 30 }}>
@@ -24,15 +25,16 @@ function Row({ title, subtitle, channels, channelMetadata, favorites, onToggleFa
         {title}
         {subtitle && <span style={{ color: 'var(--app-dim2)', fontWeight: 400 }}> — {subtitle}</span>}
       </div>
-      <div style={{ display: 'flex', gap: 14, overflowX: 'auto' }}>
+      <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 22 }}>
         {channels.map((channel) => (
-          <div key={channel.stream_id} style={{ width: 140, height: 140, flex: 'none' }}>
+          <div key={channel.stream_id} style={{ width: 140, flex: 'none' }}>
             <ChannelCard
               channel={channel}
               metadata={channelMetadata.get(channel.stream_id)}
               isFavorite={favorites.includes(channel.stream_id)}
               onToggleFavorite={() => onToggleFavorite(channel.stream_id)}
               onClick={() => onSelect(channel.stream_id)}
+              onPlay={() => onPlay(channel.stream_id)}
             />
           </div>
         ))}
@@ -43,9 +45,10 @@ function Row({ title, subtitle, channels, channelMetadata, favorites, onToggleFa
 
 interface HomeProps {
   onSelectChannel: (streamId: number) => void;
+  onPlayChannel: (streamId: number) => void;
 }
 
-export function Home({ onSelectChannel }: HomeProps) {
+export function Home({ onSelectChannel, onPlayChannel }: HomeProps) {
   const channels = useChannelStore((s) => s.channels);
   const channelMetadata = useChannelStore((s) => s.channelMetadata);
   const favorites = useLibraryStore((s) => s.favorites);
@@ -94,6 +97,7 @@ export function Home({ onSelectChannel }: HomeProps) {
         favorites={favorites}
         onToggleFavorite={toggleFavorite}
         onSelect={onSelectChannel}
+        onPlay={onPlayChannel}
       />
       {genreRows.map((row) => (
         <Row
@@ -105,6 +109,7 @@ export function Home({ onSelectChannel }: HomeProps) {
           favorites={favorites}
           onToggleFavorite={toggleFavorite}
           onSelect={onSelectChannel}
+          onPlay={onPlayChannel}
         />
       ))}
       {recentChannels.length === 0 && (

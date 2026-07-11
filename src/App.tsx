@@ -116,7 +116,7 @@ function AppContent() {
   } = useChannelStore();
   const { status: playerStatus, currentChannel, volume, selectChannel, play, stop, setVolume, initEventListener } =
     usePlayerStore();
-  const { loaded: libraryLoaded, load: loadLibrary, recordPlay } = useLibraryStore();
+  const { loaded: libraryLoaded, load: loadLibrary, recordPlay, favorites, toggleFavorite } = useLibraryStore();
 
   const [browserOpen, setBrowserOpen] = useState(true);
   const [barMode, setBarMode] = useState<BarMode>('expanded');
@@ -226,7 +226,11 @@ function AppContent() {
     }
   }
 
-  function handleSelectChannel(streamId: number) {
+  function handleOpenChannel(streamId: number) {
+    setModalStreamId(streamId);
+  }
+
+  function handlePlayChannel(streamId: number) {
     const channel = channels.find((c) => c.stream_id === streamId);
     if (!channel) return;
     selectChannel(
@@ -235,7 +239,6 @@ function AppContent() {
       settings.streamExtension,
     );
     if (libraryLoaded) recordPlay(channel.stream_id);
-    setModalStreamId(streamId);
   }
 
   const modalChannel = modalStreamId != null ? channels.find((c) => c.stream_id === modalStreamId) : undefined;
@@ -315,10 +318,10 @@ function AppContent() {
                 color: 'var(--app-text)',
               }}
             >
-              {page === 'home' && <Home onSelectChannel={handleSelectChannel} />}
-              {page === 'channels' && <Channels onSelectChannel={handleSelectChannel} />}
-              {page === 'recent' && <Recent onSelectChannel={handleSelectChannel} />}
-              {page === 'favorites' && <Favorites onSelectChannel={handleSelectChannel} />}
+              {page === 'home' && <Home onSelectChannel={handleOpenChannel} onPlayChannel={handlePlayChannel} />}
+              {page === 'channels' && <Channels onSelectChannel={handleOpenChannel} onPlayChannel={handlePlayChannel} />}
+              {page === 'recent' && <Recent onSelectChannel={handleOpenChannel} onPlayChannel={handlePlayChannel} />}
+              {page === 'favorites' && <Favorites onSelectChannel={handleOpenChannel} onPlayChannel={handlePlayChannel} />}
               {page === 'settings' && <Settings />}
             </div>
           </div>
@@ -344,6 +347,8 @@ function AppContent() {
           channel={modalChannel}
           metadata={channelMetadata.get(modalChannel.stream_id)}
           apiKey={settings.stellarApiKey}
+          isFavorite={favorites.includes(modalChannel.stream_id)}
+          onToggleFavorite={() => toggleFavorite(modalChannel.stream_id)}
           onClose={() => setModalStreamId(null)}
         />
       )}

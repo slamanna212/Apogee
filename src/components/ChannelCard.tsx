@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { IconStar, IconStarFilled } from '@tabler/icons-react';
+import { IconPlayerPlayFilled, IconStar, IconStarFilled } from '@tabler/icons-react';
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel } from '../types/stellarTunerLog';
 
@@ -27,9 +27,10 @@ interface ChannelCardProps {
   isFavorite: boolean;
   onToggleFavorite: () => void;
   onClick: () => void;
+  onPlay: () => void;
 }
 
-export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, onClick }: ChannelCardProps) {
+export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, onClick, onPlay }: ChannelCardProps) {
   const [hovered, setHovered] = useState(false);
   const name = metadata?.marketing_name || channel.name;
   const number = metadata?.channel_number ?? channel.num;
@@ -42,12 +43,14 @@ export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, o
       onMouseLeave={() => setHovered(false)}
       onClick={onClick}
       role="button"
+      style={{ cursor: 'pointer' }}
+    >
+    <div
       style={{
         position: 'relative',
         aspectRatio: '1',
         borderRadius: 16,
         overflow: 'hidden',
-        cursor: 'pointer',
         background,
         transform: hovered ? 'scale(1.03)' : 'scale(1)',
         boxShadow: hovered ? '0 8px 24px var(--app-accent-soft)' : 'none',
@@ -70,6 +73,15 @@ export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, o
           }}
         />
       )}
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'linear-gradient(160deg, rgba(255,255,255,.28), rgba(7,6,13,.4))',
+          backdropFilter: 'blur(16px) saturate(150%)',
+          WebkitBackdropFilter: 'blur(16px) saturate(150%)',
+        }}
+      />
       <div
         onClick={(e) => {
           e.stopPropagation();
@@ -140,22 +152,49 @@ export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, o
           }}
         />
       )}
-      <span
+      <div
+        onClick={(e) => {
+          e.stopPropagation();
+          onPlay();
+        }}
+        role="button"
+        aria-label={`Play ${name}`}
         style={{
           position: 'absolute',
-          bottom: 10,
-          left: 0,
-          right: 0,
-          padding: '0 8px',
-          textAlign: 'center',
-          font: '600 12px "Space Grotesk", sans-serif',
-          color: '#fff',
-          textShadow: '0 1px 4px rgba(0,0,0,.5)',
-          lineHeight: 1.25,
+          bottom: 8,
+          right: 8,
+          width: 34,
+          height: 34,
+          borderRadius: '50%',
+          background: 'var(--app-accent)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#07060d',
+          boxShadow: '0 4px 12px rgba(0,0,0,.35)',
+          transform: hovered ? 'scale(1.08)' : 'scale(1)',
+          transition: 'transform 150ms',
+          zIndex: 1,
         }}
       >
-        {name}
-      </span>
+        <IconPlayerPlayFilled size={16} />
+      </div>
+    </div>
+    <div
+      style={{
+        marginTop: 10,
+        padding: '0 4px',
+        textAlign: 'center',
+        font: '600 13.5px "Space Grotesk", sans-serif',
+        color: 'var(--app-text)',
+        lineHeight: 1.3,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {name}
+    </div>
     </div>
   );
 }

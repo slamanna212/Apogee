@@ -12,6 +12,7 @@ interface ChannelGridProps {
   favorites: number[];
   onToggleFavorite: (streamId: number) => void;
   onSelect: (streamId: number) => void;
+  onPlay: (streamId: number) => void;
   /** Recent/Favorites keep their own fixed order (recency / favorite order) instead of the shared sort toggle. */
   sortMode?: SortMode;
   onSortModeChange?: (mode: SortMode) => void;
@@ -25,6 +26,7 @@ export function ChannelGrid({
   favorites,
   onToggleFavorite,
   onSelect,
+  onPlay,
   sortMode,
   onSortModeChange,
   emptyState,
@@ -111,6 +113,7 @@ export function ChannelGrid({
                   isFavorite={favoriteSet.has(channel.stream_id)}
                   onToggleFavorite={() => onToggleFavorite(channel.stream_id)}
                   onClick={() => onSelect(channel.stream_id)}
+                  onPlay={() => onPlay(channel.stream_id)}
                 />
               ))}
             </div>

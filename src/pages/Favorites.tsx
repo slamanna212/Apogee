@@ -6,9 +6,10 @@ import { ChannelGrid } from '../components/ChannelGrid';
 
 interface FavoritesProps {
   onSelectChannel: (streamId: number) => void;
+  onPlayChannel: (streamId: number) => void;
 }
 
-export function Favorites({ onSelectChannel }: FavoritesProps) {
+export function Favorites({ onSelectChannel, onPlayChannel }: FavoritesProps) {
   const allChannels = useChannelStore((s) => s.channels);
   const channelMetadata = useChannelStore((s) => s.channelMetadata);
   const favorites = useLibraryStore((s) => s.favorites);
@@ -31,6 +32,7 @@ export function Favorites({ onSelectChannel }: FavoritesProps) {
       onSortModeChange={setSortMode}
       onToggleFavorite={toggleFavorite}
       onSelect={onSelectChannel}
+      onPlay={onPlayChannel}
       emptyState={<Text c="dimmed">Hover any channel and tap the star to save it here.</Text>}
     />
   );
