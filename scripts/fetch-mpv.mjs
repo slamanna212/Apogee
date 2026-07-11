@@ -1,21 +1,27 @@
 #!/usr/bin/env node
 // Downloads the mpv binaries bundled with Apogee so the app never depends on
-// a system-installed mpv on Windows or in the Linux AppImage build (the two
-// formats with no package-manager dependency mechanism). deb/rpm builds rely
-// on `mpv` being declared as a package dependency instead (see
-// src-tauri/tauri.conf.json's bundle.linux.deb/rpm.depends) and macOS relies
-// on the user installing it via Homebrew - neither needs anything from here.
+// a system-installed mpv. Windows has no package manager to depend on at
+// all, so it's always bundled. Linux bundles it too (on top of also
+// declaring `mpv` as a package dependency for .deb/.rpm - see
+// src-tauri/tauri.conf.json's bundle.linux.deb/rpm.depends - as a harmless
+// extra safety net) since CI builds deb/rpm/AppImage in a single pass and
+// there's no per-format way to bundle only for AppImage without splitting
+// that into a separate build invocation. macOS relies on the user installing
+// mpv via Homebrew and gets a clear in-app error message if it's missing
+// instead - see the plan this implements for why it isn't bundled there.
 //
-// Run with: node scripts/fetch-mpv.mjs [windows|appimage|all]
+// Invoked automatically from tauri.conf.json's beforeBuildCommand via
+// `node scripts/fetch-mpv.mjs auto`, which detects the host platform. Can
+// also be run directly with an explicit target: `windows`, `linux`, or `all`.
 //
 // Windows: official shinchiro mpv build, distributed as a .7z archive via
 // SourceForge (linked from https://mpv.io/installation/). Extracted with the
 // `7zip-min` devDependency so no system 7z/7-Zip install is required.
 //
-// Linux (AppImage bundle only): mpv has no official static/portable Linux
-// build (see https://github.com/mpv-player/mpv/issues/4056). This uses the
-// community "anylinux" build from pkgforge-dev/mpv-AppImage, which is itself
-// a directly-runnable, dependency-free portable executable (built with
+// Linux: mpv has no official static/portable Linux build (see
+// https://github.com/mpv-player/mpv/issues/4056). This uses the community
+// "anylinux" build from pkgforge-dev/mpv-AppImage, which is itself a
+// directly-runnable, dependency-free portable executable (built with
 // "sharun", no FUSE/extraction required) - so it's used as-is as our bundled
 // `mpv` binary, not unpacked.
 
@@ -46,11 +52,19 @@ const TARGETS = {
     outputName: 'mpv.exe',
     archiveEntry: 'mpv.exe',
   },
-  appimage: {
+  linux: {
     url: 'https://github.com/pkgforge-dev/mpv-AppImage/releases/download/v0.41.0%402026-07-01_1782914175/mpv-v0.41.0-anylinux-x86_64.AppImage',
     sha256: '9ba489eb78c39fa4d5ef9cfaf9e80b92dcb9f69a05dd365d30255e6dca3c8fbd',
     outputName: 'mpv',
   },
+};
+
+// macOS has no bundled target - it relies on a system mpv (Homebrew) and a
+// clear in-app error message if it's missing, so `auto` is a no-op there.
+const AUTO_TARGETS_BY_PLATFORM = {
+  win32: ['windows'],
+  linux: ['linux'],
+  darwin: [],
 };
 
 async function download(url, destPath) {
@@ -105,13 +119,24 @@ async function verifiedFetch(name, target) {
   console.log(`[fetch-mpv] ${name}: wrote ${finalPath}`);
 }
 
-const requested = process.argv[2] ?? 'all';
-const names = requested === 'all' ? Object.keys(TARGETS) : [requested];
+const requested = process.argv[2] ?? 'auto';
+
+let names;
+if (requested === 'auto') {
+  names = AUTO_TARGETS_BY_PLATFORM[process.platform] ?? [];
+  if (names.length === 0) {
+    console.log(`[fetch-mpv] auto: no bundled mpv target for platform "${process.platform}", nothing to fetch`);
+  }
+} else if (requested === 'all') {
+  names = Object.keys(TARGETS);
+} else {
+  names = [requested];
+}
 
 for (const name of names) {
   const target = TARGETS[name];
   if (!target) {
-    console.error(`[fetch-mpv] unknown target "${name}" (expected one of: ${Object.keys(TARGETS).join(', ')}, all)`);
+    console.error(`[fetch-mpv] unknown target "${name}" (expected one of: ${Object.keys(TARGETS).join(', ')}, auto, all)`);
     process.exit(1);
   }
   await verifiedFetch(name, target);

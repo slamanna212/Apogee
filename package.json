@@ -9,11 +9,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "tauri": "tauri",
-    "fetch:mpv:windows": "node scripts/fetch-mpv.mjs windows",
-    "fetch:mpv:appimage": "node scripts/fetch-mpv.mjs appimage",
-    "tauri:build:windows": "npm run fetch:mpv:windows && tauri build",
-    "tauri:build:linux": "tauri build --bundles deb,rpm && npm run fetch:mpv:appimage && tauri build --bundles appimage --config src-tauri/tauri.appimage.conf.json",
-    "tauri:build:mac": "tauri build"
+    "fetch:mpv": "node scripts/fetch-mpv.mjs"
   },
   "dependencies": {
     "@fontsource/sora": "^5.2.8",
