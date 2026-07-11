@@ -294,8 +294,7 @@ function AppContent() {
                 gap: 4,
               }}
             >
-              {!compact && <div style={{ font: '700 20px "Space Grotesk", sans-serif', padding: '0 8px 22px' }}>Apogee</div>}
-              {compact && <div style={{ height: 22 }} />}
+              <div style={{ height: 22 }} />
               {NAV_ITEMS.map(({ page: p, label, icon: Icon }) => (
                 <div key={p} onClick={() => setPage(p)} role="button" style={navItemStyle(page === p, compact)}>
                   <Icon size={17} />
