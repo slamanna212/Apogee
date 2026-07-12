@@ -1,14 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#1c1533"></stop>
-      <stop offset="100%" stop-color="#07060d"></stop>
-    </linearGradient>
-    <clipPath id="squircle"><rect x="0" y="0" width="240" height="240" rx="54" ry="54"></rect></clipPath>
-  </defs>
-  <g clip-path="url(#squircle)">
-    <rect width="240" height="240" fill="url(#bg)"></rect>
-    <line x1="120.0" y1="40.0" x2="120.0" y2="6.0" stroke="#8b6bff" stroke-width="7" stroke-linecap="round"></line>
+  <line x1="120.0" y1="40.0" x2="120.0" y2="6.0" stroke="#8b6bff" stroke-width="7" stroke-linecap="round"></line>
   <line x1="139.7" y1="42.6" x2="143.8" y2="27.1" stroke="#c3b3ff" stroke-width="7" stroke-linecap="round"></line>
   <line x1="158.0" y1="50.2" x2="175.0" y2="20.7" stroke="#8b6bff" stroke-width="7" stroke-linecap="round"></line>
   <line x1="173.7" y1="62.3" x2="185.1" y2="50.9" stroke="#c3b3ff" stroke-width="7" stroke-linecap="round"></line>
@@ -33,5 +24,4 @@
   <line x1="82.0" y1="50.2" x2="65.0" y2="20.7" stroke="#8b6bff" stroke-width="7" stroke-linecap="round"></line>
   <line x1="100.3" y1="42.6" x2="96.2" y2="27.1" stroke="#c3b3ff" stroke-width="7" stroke-linecap="round"></line>
   <circle cx="120" cy="116" r="34" fill="#45e0d8"></circle>
-  </g>
 </svg>

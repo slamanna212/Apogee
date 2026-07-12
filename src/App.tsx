@@ -4,6 +4,7 @@ import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { primaryMonitor } from '@tauri-apps/api/window';
 import { PhysicalPosition, PhysicalSize } from '@tauri-apps/api/dpi';
 import { IconApps, IconHistory, IconHome2, IconMinus, IconSettings, IconSquare, IconStar, IconX } from '@tabler/icons-react';
+import logoUrl from './assets/logo.svg';
 import { theme, cssVariablesResolver } from './theme';
 import { useSettingsStore } from './stores/settingsStore';
 import { useChannelStore } from './stores/channelStore';
@@ -281,17 +282,20 @@ function AppContent() {
         >
           <div
             data-tauri-drag-region
-            style={{ height: 36, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', flex: 'none' }}
+            style={{ height: 36, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 'none' }}
           >
-            <TitlebarButton label="Minimize" onClick={() => win.minimize()}>
-              <IconMinus size={14} />
-            </TitlebarButton>
-            <TitlebarButton label="Maximize" onClick={() => win.toggleMaximize()}>
-              <IconSquare size={12} />
-            </TitlebarButton>
-            <TitlebarButton label="Quit" onClick={() => win.close()}>
-              <IconX size={14} />
-            </TitlebarButton>
+            <img src={logoUrl} alt="" width={18} height={18} style={{ marginLeft: 12 }} />
+            <div style={{ display: 'flex' }}>
+              <TitlebarButton label="Minimize" onClick={() => win.minimize()}>
+                <IconMinus size={14} />
+              </TitlebarButton>
+              <TitlebarButton label="Maximize" onClick={() => win.toggleMaximize()}>
+                <IconSquare size={12} />
+              </TitlebarButton>
+              <TitlebarButton label="Quit" onClick={() => win.close()}>
+                <IconX size={14} />
+              </TitlebarButton>
+            </div>
           </div>
 
           <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
@@ -307,7 +311,19 @@ function AppContent() {
                 gap: 4,
               }}
             >
-              <div style={{ height: 22 }} />
+              <div
+                style={{
+                  height: 40,
+                  marginBottom: 6,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  justifyContent: compact ? 'center' : 'flex-start',
+                }}
+              >
+                <img src={logoUrl} alt="Apogee" width={24} height={24} />
+                {!compact && <span style={{ font: '700 15px "Space Grotesk", sans-serif', color: 'var(--app-text)' }}>Apogee</span>}
+              </div>
               {NAV_ITEMS.map(({ page: p, label, icon: Icon }) => (
                 <div key={p} onClick={() => setPage(p)} role="button" style={navItemStyle(page === p, compact)}>
                   <Icon size={17} />

@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Group, NumberInput, PasswordInput, Select, Slider, Text, TextInput } from '@mantine/core';
+import { getVersion } from '@tauri-apps/api/app';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useLibraryStore, type ThemeMode } from '../stores/libraryStore';
 import { getLiveCategories } from '../lib/xtream';
 import type { XtreamCategory } from '../types/xtream';
+import logoUrl from '../assets/logo.svg';
 
 const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: 'system', label: 'System default' },
@@ -40,6 +42,11 @@ export function Settings() {
   const [categoryId, setCategoryId] = useState<string | null>(settings.categoryId);
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
   const [testError, setTestError] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!settingsLoaded) return;
@@ -154,6 +161,20 @@ export function Settings() {
             Save
           </Button>
         </Group>
+
+        <Card title="About">
+          <Group gap={14}>
+            <img src={logoUrl} alt="Apogee" width={40} height={40} />
+            <div>
+              <Text fw={700} size="md" style={{ fontFamily: '"Space Grotesk", sans-serif' }}>
+                Apogee
+              </Text>
+              <Text size="sm" c="dimmed">
+                {appVersion ? `Version ${appVersion}` : 'Xtream Codes radio player'}
+              </Text>
+            </div>
+          </Group>
+        </Card>
       </div>
     </div>
   );
