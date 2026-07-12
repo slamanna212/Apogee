@@ -12,9 +12,12 @@ interface JumpRailProps {
 }
 
 /**
- * Plex-style sticky index: jumps are estimated proportionally against scroll
- * height (there are no per-group DOM anchors in the grid), which is close
- * enough for "jump to roughly here" behavior on a plain uniform grid.
+ * Plex-style sticky index. Jumping measures the real DOM position of the
+ * target item's row (via the item's own element, since grid rows share a
+ * top edge) rather than estimating proportionally - a proportional guess
+ * can land mid-row in the multi-column grid view and clip the row above it.
+ * The active-label highlight on scroll is still a proportional estimate,
+ * which is fine since it only needs to be approximately right.
  */
 export function JumpRail({ groups, totalCount, containerRef }: JumpRailProps) {
   const [active, setActive] = useState(groups[0]?.label);
@@ -42,6 +45,11 @@ export function JumpRail({ groups, totalCount, containerRef }: JumpRailProps) {
   function jumpTo(group: JumpGroup) {
     const el = containerRef.current;
     if (!el) return;
+    const itemEl = el.firstElementChild?.children[group.index] as HTMLElement | undefined;
+    if (itemEl) {
+      el.scrollTop += itemEl.getBoundingClientRect().top - el.getBoundingClientRect().top;
+      return;
+    }
     const ratio = totalCount > 0 ? group.index / totalCount : 0;
     el.scrollTop = ratio * (el.scrollHeight - el.clientHeight);
   }
@@ -53,11 +61,12 @@ export function JumpRail({ groups, totalCount, containerRef }: JumpRailProps) {
       style={{
         flex: 'none',
         width: 26,
+        height: '100%',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
+        justifyContent: 'center',
         gap: 2,
-        paddingTop: 4,
         overflow: 'hidden',
       }}
     >

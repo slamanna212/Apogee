@@ -40,7 +40,17 @@ export interface StellarChannelLogo {
 }
 
 export interface StellarChannelLogos {
+  color_dark?: StellarChannelLogo;
   color_dark_square?: StellarChannelLogo;
+  color_dark_alexa?: StellarChannelLogo;
+  background_wide?: StellarChannelLogo;
+  background_thumb?: StellarChannelLogo;
+  background_square?: StellarChannelLogo;
+  background?: StellarChannelLogo;
+  list_view?: StellarChannelLogo;
+  list_view_square?: StellarChannelLogo;
+  white?: StellarChannelLogo;
+  white_square?: StellarChannelLogo;
   [key: string]: StellarChannelLogo | undefined;
 }
 

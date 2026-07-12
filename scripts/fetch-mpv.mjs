@@ -40,6 +40,7 @@ import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import sevenzip from '7zip-min';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -56,6 +57,15 @@ const TARGETS = {
     url: 'https://github.com/pkgforge-dev/mpv-AppImage/releases/download/v0.41.0%402026-07-01_1782914175/mpv-v0.41.0-anylinux-x86_64.AppImage',
     sha256: '9ba489eb78c39fa4d5ef9cfaf9e80b92dcb9f69a05dd365d30255e6dca3c8fbd',
     outputName: 'mpv',
+    // The pkgforge-dev "anylinux" build is produced with AppImage tooling and
+    // ships two embedded ELF sections that AppImage desktop integrations
+    // (AppImageLauncher, Gear Lever, appimaged, etc.) read to offer
+    // self-updates: `.upd_info` (a zsync feed pointing at this project's
+    // GitHub releases) and `.sig_key`. Since we bundle and version this
+    // binary ourselves, that's exactly the "should mpv check for updates?"
+    // popup users were seeing - strip both sections so the shipped binary
+    // carries no update metadata at all.
+    stripAppImageUpdateInfo: true,
   },
 };
 
@@ -113,6 +123,17 @@ async function verifiedFetch(name, target) {
   } else {
     // Linux build is a directly-runnable portable executable - use as-is.
     renameSync(downloadPath, finalPath);
+  }
+
+  if (target.stripAppImageUpdateInfo) {
+    try {
+      execFileSync('objcopy', ['--remove-section', '.upd_info', '--remove-section', '.sig_key', finalPath]);
+      console.log(`[fetch-mpv] ${name}: stripped embedded AppImage update-info sections`);
+    } catch (err) {
+      throw new Error(
+        `[fetch-mpv] ${name}: failed to strip AppImage update-info sections (is 'objcopy'/binutils installed?): ${err.message}`,
+      );
+    }
   }
 
   chmodSync(finalPath, 0o755);

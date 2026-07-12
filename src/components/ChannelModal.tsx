@@ -63,17 +63,33 @@ export function ChannelModal({ channel, metadata, apiKey, isFavorite, onToggleFa
     metadata?.email && { Icon: IconMail, href: `mailto:${metadata.email}` },
     metadata?.phone && { Icon: IconPhone, href: `tel:${metadata.phone}` },
   ].filter((s): s is { Icon: typeof IconMail; href: string } => Boolean(s));
-  const backdrop = metadata?.logos?.color_dark_square?.url || channel.stream_icon;
+  const backdrop =
+    metadata?.logos?.background_wide?.url ||
+    metadata?.logos?.background_thumb?.url ||
+    metadata?.logos?.background_square?.url ||
+    metadata?.logos?.background?.url;
+  const backdropColor = metadata?.dark_bg_color || '#111116';
 
   return (
     <Modal opened onClose={onClose} withCloseButton={false} size="1100px" radius={26} padding={0} centered>
       <div style={{ display: 'flex', height: 560 }}>
-        <div style={{ flex: '0 0 60%', position: 'relative', padding: 36, display: 'flex', flexDirection: 'column', color: '#fff' }}>
+        <div
+          style={{
+            flex: '0 0 60%',
+            position: 'relative',
+            overflow: 'hidden',
+            padding: 36,
+            display: 'flex',
+            flexDirection: 'column',
+            color: '#fff',
+            background: backdropColor,
+          }}
+        >
           {backdrop && (
             <img
               src={backdrop}
               alt=""
-              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', filter: 'blur(30px)', transform: 'scale(1.2)' }}
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', filter: 'blur(14px)', transform: 'scale(1.1)' }}
             />
           )}
           <div style={{ position: 'absolute', inset: 0, background: 'rgba(7,6,13,.5)' }} />

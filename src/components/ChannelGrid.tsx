@@ -70,7 +70,7 @@ export function ChannelGrid({
       const label =
         sortMode === 'az'
           ? (channelMetadata.get(channel.stream_id)?.marketing_name || channel.name).charAt(0).toUpperCase()
-          : `${Math.floor((channelMetadata.get(channel.stream_id)?.channel_number ?? channel.num) / 100) * 100}`;
+          : `${Math.floor((channelMetadata.get(channel.stream_id)?.channel_number ?? channel.num) / 10) * 10}`;
       if (!seen.has(label)) {
         seen.add(label);
         result.push({ label, index });
