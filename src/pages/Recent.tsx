@@ -13,8 +13,11 @@ interface RecentProps {
 export function Recent({ onSelectChannel, onPlayChannel }: RecentProps) {
   const allChannels = useChannelStore((s) => s.channels);
   const channelMetadata = useChannelStore((s) => s.channelMetadata);
+  const nowPlaying = useChannelStore((s) => s.nowPlaying);
   const favorites = useLibraryStore((s) => s.favorites);
   const recentlyPlayed = useLibraryStore((s) => s.recentlyPlayed);
+  const viewMode = useLibraryStore((s) => s.viewMode);
+  const setViewMode = useLibraryStore((s) => s.setViewMode);
   const toggleFavorite = useLibraryStore((s) => s.toggleFavorite);
 
   const channels = useMemo(
@@ -30,7 +33,10 @@ export function Recent({ onSelectChannel, onPlayChannel }: RecentProps) {
       title="Recent"
       channels={channels}
       channelMetadata={channelMetadata}
+      nowPlaying={nowPlaying}
       favorites={favorites}
+      viewMode={viewMode}
+      onViewModeChange={setViewMode}
       onToggleFavorite={toggleFavorite}
       onSelect={onSelectChannel}
       onPlay={onPlayChannel}

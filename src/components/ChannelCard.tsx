@@ -3,7 +3,7 @@ import { IconPlayerPlayFilled, IconStar, IconStarFilled } from '@tabler/icons-re
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel } from '../types/stellarTunerLog';
 
-const GRADIENTS: [string, string][] = [
+export const GRADIENTS: [string, string][] = [
   ['#ff7a5c', '#8b6bff'],
   ['#45e0d8', '#5c7cfa'],
   ['#f76707', '#f06595'],
@@ -14,7 +14,7 @@ const GRADIENTS: [string, string][] = [
   ['#339af0', '#12b886'],
 ];
 
-function hashGradient(seed: string): string {
+export function hashGradient(seed: string): string {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0;
   const [a, b] = GRADIENTS[Math.abs(hash) % GRADIENTS.length];
@@ -98,10 +98,10 @@ export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, o
         aria-label={isFavorite ? 'Remove favorite' : 'Add favorite'}
         style={{
           position: 'absolute',
-          top: 8,
-          right: 8,
-          width: 26,
-          height: 26,
+          top: 10,
+          right: 10,
+          width: 30,
+          height: 30,
           borderRadius: '50%',
           background: 'rgba(7,6,13,.55)',
           backdropFilter: 'blur(6px)',
@@ -114,16 +114,16 @@ export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, o
           zIndex: 1,
         }}
       >
-        {isFavorite ? <IconStarFilled size={14} /> : <IconStar size={14} />}
+        {isFavorite ? <IconStarFilled size={16} /> : <IconStar size={16} />}
       </div>
       <span
         style={{
           position: 'absolute',
-          top: 12,
+          top: 14,
           left: 0,
           right: 0,
           textAlign: 'center',
-          font: '700 15px "Space Grotesk", sans-serif',
+          font: '700 17px "Space Grotesk", sans-serif',
           color: 'rgba(255,255,255,.85)',
           letterSpacing: 0.5,
           textShadow: '0 1px 4px rgba(0,0,0,.5)',
@@ -168,10 +168,10 @@ export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, o
         aria-label={`Play ${name}`}
         style={{
           position: 'absolute',
-          bottom: 8,
-          right: 8,
-          width: 34,
-          height: 34,
+          bottom: 10,
+          right: 10,
+          width: 40,
+          height: 40,
           borderRadius: '50%',
           background: 'var(--app-accent)',
           display: 'flex',
@@ -184,16 +184,16 @@ export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, o
           zIndex: 1,
         }}
       >
-        <IconPlayerPlayFilled size={16} />
+        <IconPlayerPlayFilled size={18} />
       </div>
     </div>
     </div>
     <div
       style={{
-        marginTop: 10,
+        marginTop: 12,
         padding: '0 4px',
         textAlign: 'center',
-        font: '600 13.5px "Space Grotesk", sans-serif',
+        font: '600 15px "Space Grotesk", sans-serif',
         color: 'var(--app-text)',
         lineHeight: 1.3,
         overflow: 'hidden',
