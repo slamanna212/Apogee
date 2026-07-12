@@ -106,9 +106,9 @@ function PlayStopButton({
           style={{
             width: 0,
             height: 0,
-            borderTop: `${size * 0.17}px solid transparent`,
-            borderBottom: `${size * 0.17}px solid transparent`,
-            borderLeft: `${size * 0.27}px solid var(--app-bg)`,
+            borderTop: `${size * 0.24}px solid transparent`,
+            borderBottom: `${size * 0.24}px solid transparent`,
+            borderLeft: `${size * 0.38}px solid var(--app-bg)`,
             marginLeft: 4,
           }}
         />
