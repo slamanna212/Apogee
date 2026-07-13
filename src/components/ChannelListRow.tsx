@@ -78,10 +78,10 @@ export function ChannelListRow({
         <img
           src={artworkUrl}
           alt=""
-          style={{ width: 56, height: 56, borderRadius: 14, objectFit: 'cover', flex: 'none', background: 'var(--app-panel2)' }}
+          style={{ width: 68, height: 68, borderRadius: 16, objectFit: 'cover', flex: 'none', background: 'var(--app-panel2)' }}
         />
       ) : (
-        <div style={{ width: 56, height: 56, borderRadius: 14, background: 'var(--app-panel2)', flex: 'none' }} />
+        <div style={{ width: 68, height: 68, borderRadius: 16, background: 'var(--app-panel2)', flex: 'none' }} />
       )}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
         <div style={{ minWidth: 0, maxWidth: 320, flex: 'none' }}>
