@@ -60,7 +60,7 @@ export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, o
         position: 'absolute',
         inset: 0,
         background,
-        transform: hovered ? 'scale(1.03)' : 'scale(1)',
+        transform: hovered ? 'scale(1.03) translateZ(0)' : 'scale(1) translateZ(0)',
         transition: 'transform 150ms',
       }}
     >
@@ -75,7 +75,7 @@ export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, o
             height: '100%',
             objectFit: 'cover',
             filter: 'blur(18px)',
-            transform: 'scale(1.2)',
+            transform: 'scale(1.2) translateZ(0)',
             opacity: 0.6,
           }}
         />
@@ -87,6 +87,7 @@ export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, o
           background: 'linear-gradient(160deg, rgba(255,255,255,.28), rgba(7,6,13,.4))',
           backdropFilter: 'blur(16px) saturate(150%)',
           WebkitBackdropFilter: 'blur(16px) saturate(150%)',
+          transform: 'translateZ(0)',
         }}
       />
       <div
