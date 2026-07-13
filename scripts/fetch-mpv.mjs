@@ -42,6 +42,13 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import sevenzip from '7zip-min';
+// Node's built-in global fetch (a frozen vendored undici) hits a known
+// assertion crash - "assert(!this.paused)" in Parser.finish - when a
+// streamed download's destination write backpressures while the socket
+// ends (nodejs/undici#5360, fixed in the standalone undici package at
+// 8.4.1+). The fix hasn't landed in Node 24's bundled undici yet, so use
+// the actively-maintained npm package here instead of the ambient global.
+import { fetch } from 'undici';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BINARIES_DIR = join(__dirname, '..', 'src-tauri', 'binaries');

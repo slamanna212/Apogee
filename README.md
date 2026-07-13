@@ -15,7 +15,7 @@
 ---
 
 ## ❔ What is Apogee
-I wanted a desktop radio player for the Satellite Radio channels included with some IPTV sources and found around the internet.
+I wanted a desktop radio player for the Satellite Radio channels that get included with IPTV services/found around the web.
 
 Apogee combines these streams with internet data to provide a beautiful player experience.
 
