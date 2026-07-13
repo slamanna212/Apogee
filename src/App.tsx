@@ -10,9 +10,11 @@ import { useSettingsStore } from './stores/settingsStore';
 import { useChannelStore } from './stores/channelStore';
 import { usePlayerStore } from './stores/playerStore';
 import { useLibraryStore } from './stores/libraryStore';
+import { useUpdateStore } from './stores/updateStore';
 import { setMediaMetadata } from './lib/mediaSession';
 import { TransportBar, type BarMode } from './components/TransportBar';
 import { ChannelModal } from './components/ChannelModal';
+import { UpdateModal } from './components/UpdateModal';
 import { Home } from './pages/Home';
 import { Channels } from './pages/Channels';
 import { Recent } from './pages/Recent';
@@ -145,6 +147,15 @@ function AppContent() {
     if (settingsLoaded) {
       usePlayerStore.setState({ volume: settings.defaultVolume });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsLoaded]);
+
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    const timer = setTimeout(() => {
+      void useUpdateStore.getState().checkForUpdates(settings.updateChannel);
+    }, 5000);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsLoaded]);
 
@@ -387,6 +398,8 @@ function AppContent() {
           onClose={() => setModalStreamId(null)}
         />
       )}
+
+      <UpdateModal />
     </div>
   );
 }

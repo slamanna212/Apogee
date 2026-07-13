@@ -31,8 +31,18 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/slamanna212/Apogee/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVBRUU0QzZFMjBCMkQ4NjEKUldSaDJMSWdia3p1V3RkR3p3MEhEZmtlWnJuUlJuV3lxdlpNb200T0NINTIvTGVzWXNzRmRObzcK"
+    }
+  },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["deb", "rpm", "appimage", "nsis"],
     "icon": [
       "icons/32x32.png",

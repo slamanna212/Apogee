@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Group, NumberInput, PasswordInput, Select, Slider, Text, TextInput } from '@mantine/core';
 import { getVersion } from '@tauri-apps/api/app';
-import { useSettingsStore } from '../stores/settingsStore';
+import { useSettingsStore, type UpdateChannel } from '../stores/settingsStore';
 import { useLibraryStore, type ThemeMode } from '../stores/libraryStore';
+import { useUpdateStore } from '../stores/updateStore';
 import { getLiveCategories } from '../lib/xtream';
 import type { XtreamCategory } from '../types/xtream';
 import logoUrl from '../assets/logo.svg';
@@ -11,6 +12,11 @@ const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: 'system', label: 'System default' },
   { value: 'light', label: 'Light' },
   { value: 'dark', label: 'Dark' },
+];
+
+const UPDATE_CHANNEL_OPTIONS: { value: UpdateChannel; label: string }[] = [
+  { value: 'stable', label: 'Stable' },
+  { value: 'beta', label: 'Beta (pre-releases)' },
 ];
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
@@ -43,10 +49,20 @@ export function Settings() {
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
   const [testError, setTestError] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [checkedUpToDate, setCheckedUpToDate] = useState(false);
+
+  const updateStatus = useUpdateStore((s) => s.status);
+  const checkForUpdates = useUpdateStore((s) => s.checkForUpdates);
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
   }, []);
+
+  async function handleCheckForUpdates() {
+    setCheckedUpToDate(false);
+    await checkForUpdates(settings.updateChannel);
+    if (useUpdateStore.getState().status === 'idle') setCheckedUpToDate(true);
+  }
 
   useEffect(() => {
     if (!settingsLoaded) return;
@@ -161,6 +177,26 @@ export function Settings() {
             Save
           </Button>
         </Group>
+
+        <Card title="Updates">
+          <Select
+            label="Update channel"
+            data={UPDATE_CHANNEL_OPTIONS}
+            value={settings.updateChannel}
+            onChange={(v) => updateSettings({ updateChannel: (v as UpdateChannel) ?? 'stable' })}
+            allowDeselect={false}
+          />
+          <Group align="center">
+            <Button onClick={handleCheckForUpdates} loading={updateStatus === 'checking'}>
+              Check for Updates
+            </Button>
+            {checkedUpToDate && (
+              <Text c="teal" size="sm">
+                You're up to date
+              </Text>
+            )}
+          </Group>
+        </Card>
 
         <Card title="About">
           <Group gap={14}>

@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { load, type Store } from '@tauri-apps/plugin-store';
 import { getSecret, setSecret, SECRET_KEYS } from '../lib/secrets';
 
+export type UpdateChannel = 'stable' | 'beta';
+
 export interface Settings {
   baseUrl: string;
   username: string;
@@ -12,6 +14,7 @@ export interface Settings {
   stellarApiKey: string;
   pollIntervalSec: number;
   defaultVolume: number;
+  updateChannel: UpdateChannel;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -24,6 +27,7 @@ export const DEFAULT_SETTINGS: Settings = {
   stellarApiKey: '',
   pollIntervalSec: 25,
   defaultVolume: 70,
+  updateChannel: 'stable',
 };
 
 type PersistedSettings = Omit<Settings, 'password' | 'stellarApiKey'>;

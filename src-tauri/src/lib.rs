@@ -1,6 +1,7 @@
 mod media_session;
 mod mpv;
 mod secrets;
+mod updater;
 mod waveform;
 
 use tauri::Manager;
@@ -10,6 +11,7 @@ pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_http::init())
     .plugin(tauri_plugin_store::Builder::default().build())
+    .plugin(tauri_plugin_process::init())
     .manage(mpv::MpvState::default())
     .invoke_handler(tauri::generate_handler![
       mpv::mpv_load,
@@ -21,6 +23,7 @@ pub fn run() {
       secrets::secrets_delete,
       media_session::media_session_set_metadata,
       media_session::media_session_set_playback,
+      updater::check_update_at_endpoint,
     ])
     .setup(|app| {
       app.handle().plugin(
@@ -28,6 +31,9 @@ pub fn run() {
           .level(log::LevelFilter::Info)
           .build(),
       )?;
+
+      #[cfg(desktop)]
+      app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
 
       waveform::ensure_started(&app.handle());
 
