@@ -15,6 +15,7 @@ export interface Settings {
   pollIntervalSec: number;
   defaultVolume: number;
   updateChannel: UpdateChannel;
+  keepMiniWindowOnTop: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -28,6 +29,7 @@ export const DEFAULT_SETTINGS: Settings = {
   pollIntervalSec: 25,
   defaultVolume: 70,
   updateChannel: 'stable',
+  keepMiniWindowOnTop: true,
 };
 
 type PersistedSettings = Omit<Settings, 'password' | 'stellarApiKey'>;

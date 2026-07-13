@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Group, NumberInput, PasswordInput, Select, Slider, Text, TextInput } from '@mantine/core';
+import { Alert, Button, Group, NumberInput, PasswordInput, Select, Slider, Switch, Text, TextInput } from '@mantine/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { useSettingsStore, type UpdateChannel } from '../stores/settingsStore';
 import { useLibraryStore, type ThemeMode } from '../stores/libraryStore';
@@ -169,6 +169,12 @@ export function Settings() {
             value={themeMode}
             onChange={(v) => setThemeMode((v as ThemeMode) ?? 'system')}
             allowDeselect={false}
+          />
+          <Switch
+            label="Keep window on top when using the mini player"
+            description="Applies to the expanded and collapsed mini player only, not the full window"
+            checked={settings.keepMiniWindowOnTop}
+            onChange={(e) => updateSettings({ keepMiniWindowOnTop: e.currentTarget.checked })}
           />
         </Card>
 

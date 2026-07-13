@@ -51,18 +51,24 @@ async function applyWindowState(browserOpen: boolean, barMode: BarMode) {
   const win = getCurrentWebviewWindow();
   const monitor = (await currentMonitor()) ?? (await primaryMonitor());
   const scale = monitor?.scaleFactor ?? 1;
+  const keepMiniWindowOnTop = useSettingsStore.getState().settings.keepMiniWindowOnTop;
 
   const target = browserOpen
     ? { width: CARD_WIDTH, height: CARD_HEIGHT + BAR_OVERLAP, resizable: true, alwaysOnTop: false }
     : barMode === 'expanded'
-      ? { ...EXPANDED_BAR_SIZE, resizable: false, alwaysOnTop: true }
-      : { ...COLLAPSED_BAR_SIZE, resizable: false, alwaysOnTop: true };
+      ? { ...EXPANDED_BAR_SIZE, resizable: false, alwaysOnTop: keepMiniWindowOnTop }
+      : { ...COLLAPSED_BAR_SIZE, resizable: false, alwaysOnTop: keepMiniWindowOnTop };
 
   const width = Math.round(target.width * scale);
   const height = Math.round(target.height * scale);
 
-  await win.setResizable(target.resizable);
-  await win.setAlwaysOnTop(target.alwaysOnTop);
+  // On Linux/GTK, calling setResizable(false) before setSize locks the
+  // window manager's min/max size hints to whatever size the window
+  // currently is, which can leave setSize's request only partially applied
+  // (the OS-level window - and thus its WM drag/placement bounds - stays
+  // close to the old, larger size even though content renders smaller).
+  // Always resize while resizable, then lock resizability down afterward.
+  await win.setResizable(true);
   await win.setSize(new PhysicalSize(width, height));
 
   if (monitor) {
@@ -72,6 +78,9 @@ async function applyWindowState(browserOpen: boolean, barMode: BarMode) {
       : monitor.position.y + monitor.size.height - height - Math.round(SCREEN_MARGIN * scale);
     await win.setPosition(new PhysicalPosition(Math.round(x), Math.round(y)));
   }
+
+  await win.setResizable(target.resizable);
+  await win.setAlwaysOnTop(target.alwaysOnTop);
 }
 
 const titlebarBtnStyle: CSSProperties = {
@@ -197,25 +206,35 @@ function AppContent() {
 
   useEffect(() => {
     void applyWindowState(browserOpen, barMode);
-  }, [browserOpen, barMode]);
+  }, [browserOpen, barMode, settings.keepMiniWindowOnTop]);
 
   const windowStateRef = useRef({ browserOpen, barMode });
   useEffect(() => {
     windowStateRef.current = { browserOpen, barMode };
   }, [browserOpen, barMode]);
 
+  const wasMinimizedRef = useRef(false);
   useEffect(() => {
     // On Linux, undecorated/transparent windows sometimes get left at the
     // wrong OS size/position after being minimized and restored (a GTK/WM
     // quirk, not something the app's own state tracks). Regaining focus is
     // a reliable signal that the window just came back, so re-assert the
     // size/position for the current mode at that point.
+    //
+    // Only do this for an actual minimize -> restore transition, not every
+    // focus-changed event: dragging via data-tauri-drag-region is known to
+    // fire spurious focus toggles mid-drag (tauri-apps/tauri#10767), and
+    // unconditionally re-asserting position on every focus regain fights
+    // the live OS-driven drag, making the window feel like it snaps/can't
+    // be moved past a point.
     const win = getCurrentWebviewWindow();
     let unlisten: (() => void) | undefined;
     win
       .onFocusChanged(async ({ payload: focused }) => {
-        if (!focused) return;
-        if (await win.isMinimized()) return;
+        const minimized = await win.isMinimized();
+        const wasMinimized = wasMinimizedRef.current;
+        wasMinimizedRef.current = minimized;
+        if (!focused || minimized || !wasMinimized) return;
         const { browserOpen, barMode } = windowStateRef.current;
         void applyWindowState(browserOpen, barMode);
       })
