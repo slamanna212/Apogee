@@ -20,6 +20,8 @@ interface TransportBarProps {
   onMinus: () => void;
   onPlayStop: () => void;
   onVolumeChange: (volume: number) => void;
+  /** True when running as the standalone mini player window (not the full app), which is short and needs the volume popover to open sideways instead of upward. */
+  compactVolumePopover?: boolean;
 }
 
 function PlusMinus({
@@ -194,10 +196,95 @@ function VerticalVolumeSlider({
   );
 }
 
-function VolumeControl({ volume, onChange }: { volume: number; onChange: (v: number) => void }) {
-  const [opened, setOpened] = useState(false);
+function HorizontalVolumeSlider({
+  volume,
+  onChange,
+  width = 90,
+}: {
+  volume: number;
+  onChange: (v: number) => void;
+  width?: number;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+
+  function valueFromClientX(clientX: number) {
+    const track = trackRef.current;
+    if (!track) return volume;
+    const rect = track.getBoundingClientRect();
+    const ratio = (clientX - rect.left) / rect.width;
+    return Math.max(0, Math.min(100, Math.round(ratio * 100)));
+  }
+
+  function handlePointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    onChange(valueFromClientX(e.clientX));
+  }
+  function handlePointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.buttons !== 1) return;
+    onChange(valueFromClientX(e.clientX));
+  }
+  function handleWheel(e: React.WheelEvent<HTMLDivElement>) {
+    e.preventDefault();
+    onChange(Math.max(0, Math.min(100, volume - Math.sign(e.deltaY) * 3)));
+  }
+
   return (
-    <Popover opened={opened} onChange={setOpened} position="top" withArrow shadow="md">
+    <div
+      ref={trackRef}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onWheel={handleWheel}
+      style={{
+        width,
+        height: 5,
+        borderRadius: 4,
+        background: 'rgba(255,255,255,.12)',
+        position: 'relative',
+        cursor: 'pointer',
+        touchAction: 'none',
+      }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          height: '100%',
+          width: `${volume}%`,
+          borderRadius: 4,
+          background: 'var(--app-accent2)',
+        }}
+      />
+      <div
+        style={{
+          position: 'absolute',
+          left: `${volume}%`,
+          top: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: 14,
+          height: 14,
+          borderRadius: '50%',
+          background: '#fff',
+          boxShadow: '0 0 8px var(--app-accent2)',
+        }}
+      />
+    </div>
+  );
+}
+
+function VolumeControl({
+  volume,
+  onChange,
+  compact,
+}: {
+  volume: number;
+  onChange: (v: number) => void;
+  compact?: boolean;
+}) {
+  const [opened, setOpened] = useState(false);
+
+  return (
+    <Popover opened={opened} onChange={setOpened} position={compact ? 'left' : 'top'} withArrow shadow="md">
       <Popover.Target>
         <div
           onClick={() => setOpened((v) => !v)}
@@ -221,15 +308,27 @@ function VolumeControl({ volume, onChange }: { volume: number; onChange: (v: num
           <IconVolume size={18} />
         </div>
       </Popover.Target>
-      <Popover.Dropdown className="apogee-glass" style={{ borderRadius: 20, padding: '14px 0' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, width: 36 }}>
-          <Text size="xs" fw={600} c="dimmed">
-            {volume}%
-          </Text>
-          <VerticalVolumeSlider volume={volume} onChange={onChange} />
-          <IconVolume2 size={12} style={{ color: 'var(--app-dim)' }} />
-        </div>
-      </Popover.Dropdown>
+      {compact ? (
+        <Popover.Dropdown className="apogee-glass" style={{ borderRadius: 20, padding: '0 14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 36 }}>
+            <IconVolume2 size={12} style={{ color: 'var(--app-dim)', flex: 'none' }} />
+            <HorizontalVolumeSlider volume={volume} onChange={onChange} />
+            <Text size="xs" fw={600} c="dimmed" style={{ flex: 'none', width: 28 }}>
+              {volume}%
+            </Text>
+          </div>
+        </Popover.Dropdown>
+      ) : (
+        <Popover.Dropdown className="apogee-glass" style={{ borderRadius: 20, padding: '14px 0' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, width: 36 }}>
+            <Text size="xs" fw={600} c="dimmed">
+              {volume}%
+            </Text>
+            <VerticalVolumeSlider volume={volume} onChange={onChange} />
+            <IconVolume2 size={12} style={{ color: 'var(--app-dim)' }} />
+          </div>
+        </Popover.Dropdown>
+      )}
     </Popover>
   );
 }
@@ -441,6 +540,7 @@ export function TransportBar({
   onMinus,
   onPlayStop,
   onVolumeChange,
+  compactVolumePopover,
 }: TransportBarProps) {
   const [expandedArtwork, setExpandedArtwork] = useState<string | null>(null);
 
@@ -528,7 +628,7 @@ export function TransportBar({
           errorMessage={errorMessage}
           onArtworkClick={setExpandedArtwork}
         />
-        <VolumeControl volume={volume} onChange={onVolumeChange} />
+        <VolumeControl volume={volume} onChange={onVolumeChange} compact={compactVolumePopover} />
       </div>
     </>
   );

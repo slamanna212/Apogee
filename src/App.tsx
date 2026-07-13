@@ -428,6 +428,7 @@ function AppContent() {
               action.catch((err) => console.error('play/stop failed', err));
             }}
             onVolumeChange={setVolume}
+            compactVolumePopover={!browserOpen}
           />
         </div>
       )}
