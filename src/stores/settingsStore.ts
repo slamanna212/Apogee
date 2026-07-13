@@ -16,6 +16,8 @@ export interface Settings {
   defaultVolume: number;
   updateChannel: UpdateChannel;
   keepMiniWindowOnTop: boolean;
+  onboardingComplete: boolean;
+  onboardingStep: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -30,6 +32,8 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultVolume: 70,
   updateChannel: 'stable',
   keepMiniWindowOnTop: true,
+  onboardingComplete: false,
+  onboardingStep: 0,
 };
 
 type PersistedSettings = Omit<Settings, 'password' | 'stellarApiKey'>;
@@ -81,12 +85,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await store.save();
     }
 
+    // Installs from before onboarding existed won't have onboardingComplete in
+    // their stored settings - if they already have working Xtream config, treat
+    // onboarding as already done rather than replaying it on their next launch.
+    const isPreOnboardingInstall = stored.onboardingComplete === undefined && !!stored.baseUrl && !!stored.username && !!stored.categoryId;
+
     set({
       settings: {
         ...DEFAULT_SETTINGS,
         ...(stored as Partial<PersistedSettings>),
         password: password ?? '',
         stellarApiKey: stellarApiKey ?? '',
+        onboardingComplete: isPreOnboardingInstall || Boolean(stored.onboardingComplete),
       },
       loaded: true,
     });

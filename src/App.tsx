@@ -15,6 +15,7 @@ import { setMediaMetadata } from './lib/mediaSession';
 import { TransportBar, type BarMode } from './components/TransportBar';
 import { ChannelModal } from './components/ChannelModal';
 import { UpdateModal } from './components/UpdateModal';
+import { OnboardingWizard } from './components/onboarding/OnboardingWizard';
 import { Home } from './pages/Home';
 import { Channels } from './pages/Channels';
 import { Recent } from './pages/Recent';
@@ -144,6 +145,12 @@ function AppContent() {
   const [page, setPage] = useState<Page>('home');
   const [modalStreamId, setModalStreamId] = useState<number | null>(null);
   const [compact, setCompact] = useState(false);
+
+  const onboardingActive = settingsLoaded && !settings.onboardingComplete;
+
+  useEffect(() => {
+    if (onboardingActive && !browserOpen) setBrowserOpen(true);
+  }, [onboardingActive, browserOpen]);
 
   useEffect(() => {
     loadSettings();
@@ -339,83 +346,91 @@ function AppContent() {
           </div>
 
           <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-            <div
-              style={{
-                flex: 'none',
-                width: compact ? 68 : 220,
-                background: 'rgba(255,255,255,.045)',
-                borderRight: '1px solid var(--app-border)',
-                padding: '0 16px 26px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 4,
-              }}
-            >
-              <div
-                style={{
-                  height: 40,
-                  marginBottom: 6,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  justifyContent: compact ? 'center' : 'flex-start',
-                }}
-              >
-                <img src={logoUrl} alt="Apogee" width={24} height={24} />
-                {!compact && <span style={{ font: '700 15px "Space Grotesk", sans-serif', color: 'var(--app-text)' }}>Apogee</span>}
-              </div>
-              {NAV_ITEMS.map(({ page: p, label, icon: Icon }) => (
-                <div key={p} onClick={() => setPage(p)} role="button" style={navItemStyle(page === p, compact)}>
-                  <Icon size={17} />
-                  {!compact && label}
+            {onboardingActive ? (
+              <OnboardingWizard />
+            ) : (
+              <>
+                <div
+                  style={{
+                    flex: 'none',
+                    width: compact ? 68 : 220,
+                    background: 'rgba(255,255,255,.045)',
+                    borderRight: '1px solid var(--app-border)',
+                    padding: '0 16px 26px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4,
+                  }}
+                >
+                  <div
+                    style={{
+                      height: 40,
+                      marginBottom: 6,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      justifyContent: compact ? 'center' : 'flex-start',
+                    }}
+                  >
+                    <img src={logoUrl} alt="Apogee" width={24} height={24} />
+                    {!compact && <span style={{ font: '700 15px "Space Grotesk", sans-serif', color: 'var(--app-text)' }}>Apogee</span>}
+                  </div>
+                  {NAV_ITEMS.map(({ page: p, label, icon: Icon }) => (
+                    <div key={p} onClick={() => setPage(p)} role="button" style={navItemStyle(page === p, compact)}>
+                      <Icon size={17} />
+                      {!compact && label}
+                    </div>
+                  ))}
+                  <div style={{ flex: 1 }} />
+                  <div onClick={() => setPage('settings')} role="button" style={navItemStyle(page === 'settings', compact)}>
+                    <IconSettings size={17} />
+                    {!compact && 'Settings'}
+                  </div>
                 </div>
-              ))}
-              <div style={{ flex: 1 }} />
-              <div onClick={() => setPage('settings')} role="button" style={navItemStyle(page === 'settings', compact)}>
-                <IconSettings size={17} />
-                {!compact && 'Settings'}
-              </div>
-            </div>
 
-            <div
-              style={{
-                flex: 1,
-                background: 'radial-gradient(circle at 30% 0%, var(--app-accent-soft), transparent 55%), var(--app-bg2)',
-                padding: '28px 32px',
-                overflowY: 'auto',
-                overflowX: 'hidden',
-                display: 'flex',
-                flexDirection: 'column',
-                color: 'var(--app-text)',
-              }}
-            >
-              {page === 'home' && <Home onSelectChannel={handleOpenChannel} onPlayChannel={handlePlayChannel} />}
-              {page === 'channels' && <Channels onSelectChannel={handleOpenChannel} onPlayChannel={handlePlayChannel} />}
-              {page === 'recent' && <Recent onSelectChannel={handleOpenChannel} onPlayChannel={handlePlayChannel} />}
-              {page === 'favorites' && <Favorites onSelectChannel={handleOpenChannel} onPlayChannel={handlePlayChannel} />}
-              {page === 'settings' && <Settings />}
-            </div>
+                <div
+                  style={{
+                    flex: 1,
+                    background: 'radial-gradient(circle at 30% 0%, var(--app-accent-soft), transparent 55%), var(--app-bg2)',
+                    padding: '28px 32px',
+                    overflowY: 'auto',
+                    overflowX: 'hidden',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    color: 'var(--app-text)',
+                  }}
+                >
+                  {page === 'home' && <Home onSelectChannel={handleOpenChannel} onPlayChannel={handlePlayChannel} />}
+                  {page === 'channels' && <Channels onSelectChannel={handleOpenChannel} onPlayChannel={handlePlayChannel} />}
+                  {page === 'recent' && <Recent onSelectChannel={handleOpenChannel} onPlayChannel={handlePlayChannel} />}
+                  {page === 'favorites' && <Favorites onSelectChannel={handleOpenChannel} onPlayChannel={handlePlayChannel} />}
+                  {page === 'settings' && <Settings />}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
 
-      <div style={{ position: 'absolute', left: '50%', bottom: 0, transform: 'translateX(-50%)', zIndex: 10 }}>
-        <TransportBar
-          mode={barMode}
-          status={playerStatus}
-          currentChannel={currentChannel}
-          nowPlaying={currentNowPlaying}
-          volume={volume}
-          onPlus={handlePlus}
-          onMinus={handleMinus}
-          errorMessage={errorMessage}
-          onPlayStop={() => {
-            const action = playerStatus === 'playing' || playerStatus === 'loading' ? stop() : play();
-            action.catch((err) => console.error('play/stop failed', err));
-          }}
-          onVolumeChange={setVolume}
-        />
-      </div>
+      {!onboardingActive && (
+        <div style={{ position: 'absolute', left: '50%', bottom: 0, transform: 'translateX(-50%)', zIndex: 10 }}>
+          <TransportBar
+            mode={barMode}
+            status={playerStatus}
+            currentChannel={currentChannel}
+            nowPlaying={currentNowPlaying}
+            volume={volume}
+            onPlus={handlePlus}
+            onMinus={handleMinus}
+            errorMessage={errorMessage}
+            onPlayStop={() => {
+              const action = playerStatus === 'playing' || playerStatus === 'loading' ? stop() : play();
+              action.catch((err) => console.error('play/stop failed', err));
+            }}
+            onVolumeChange={setVolume}
+          />
+        </div>
+      )}
 
       {modalChannel && (
         <ChannelModal
@@ -428,7 +443,7 @@ function AppContent() {
         />
       )}
 
-      <UpdateModal />
+      {!onboardingActive && <UpdateModal />}
     </div>
   );
 }
