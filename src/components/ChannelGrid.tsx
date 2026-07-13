@@ -102,7 +102,7 @@ export function ChannelGrid({
                   alignItems: 'center',
                   justifyContent: 'center',
                   background: viewMode === mode ? 'var(--app-accent)' : 'transparent',
-                  color: viewMode === mode ? '#07060d' : 'var(--app-dim)',
+                  color: viewMode === mode ? 'var(--app-bg)' : 'var(--app-dim)',
                 }}
               >
                 {mode === 'grid' ? <IconLayoutGrid size={15} /> : <IconLayoutList size={15} />}
@@ -121,7 +121,7 @@ export function ChannelGrid({
                     borderRadius: 999,
                     cursor: 'pointer',
                     background: sortMode === mode ? 'var(--app-accent)' : 'transparent',
-                    color: sortMode === mode ? '#07060d' : 'var(--app-dim)',
+                    color: sortMode === mode ? 'var(--app-bg)' : 'var(--app-dim)',
                     font: '600 12px "Sora", sans-serif',
                   }}
                 >
