@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { fetch } from '@tauri-apps/plugin-http';
 import { Update, type DownloadEvent } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
@@ -115,7 +115,15 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
       let lastFlush = 0;
       const flush = () => set({ progress: { downloaded, total } });
 
-      await pendingUpdate.downloadAndInstall((event: DownloadEvent) => {
+      // Routed through our own `download_and_install_update` command rather
+      // than the plugin's `Update.downloadAndInstall()` - on Windows, the
+      // plugin's own install step launches the installer in a way that gets
+      // silently killed by Apogee's mpv-guarding Job Object the instant the
+      // app exits afterward. See src-tauri/src/updater.rs for the fix; the
+      // wire shape of these events matches the plugin's own DownloadEvent
+      // exactly, so the handling below is unchanged.
+      const onEvent = new Channel<DownloadEvent>();
+      onEvent.onmessage = (event) => {
         if (event.event === 'Started') {
           downloaded = 0;
           total = event.data.contentLength;
@@ -131,7 +139,8 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
         } else if (event.event === 'Finished') {
           flush();
         }
-      });
+      };
+      await invoke('download_and_install_update', { rid: pendingUpdate.rid, onEvent });
       set({ status: 'ready' });
     } catch (err) {
       set({ status: 'error', errorMessage: err instanceof Error ? err.message : String(err) });

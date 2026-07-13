@@ -121,6 +121,16 @@ pub fn kill_blocking(state: &MpvState) {
 /// returned `Job` kept alive for the process lifetime (e.g. via Tauri managed
 /// state) - dropping it early would close the handle and kill mpv
 /// prematurely.
+///
+/// Also sets `JOB_OBJECT_LIMIT_BREAKAWAY_OK` (non-silent breakaway). By
+/// default *every* child process automatically joins this same job, which
+/// used to also silently kill the Windows updater's installer the instant
+/// Apogee exits post-handoff (before it could even show its progress
+/// window). This flag doesn't change that default by itself - a child still
+/// joins the job unless it explicitly passes `CREATE_BREAKAWAY_FROM_JOB` at
+/// creation time, which `spawn_mpv` never does - it only makes that escape
+/// hatch available for the one spawn that now deliberately uses it (the
+/// updater's installer launch in `updater.rs`).
 #[cfg(windows)]
 pub fn create_process_job() -> Option<win32job::Job> {
     let job = match win32job::Job::create() {
@@ -139,6 +149,7 @@ pub fn create_process_job() -> Option<win32job::Job> {
         }
     };
     info.limit_kill_on_job_close();
+    info.limit_breakaway_ok();
     if let Err(e) = job.set_extended_limit_info(&info) {
         log::warn!("failed to configure process job object: {e}");
         return None;

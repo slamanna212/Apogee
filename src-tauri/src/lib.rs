@@ -24,6 +24,7 @@ pub fn run() {
       media_session::media_session_set_metadata,
       media_session::media_session_set_playback,
       updater::check_update_at_endpoint,
+      updater::download_and_install_update,
     ])
     .setup(|app| {
       app.handle().plugin(
