@@ -109,6 +109,20 @@ export function Settings() {
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       <div style={{ font: '700 24px "Space Grotesk", sans-serif', marginBottom: 24, width: '100%', maxWidth: 600 }}>Settings</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%', maxWidth: 600 }}>
+        <Card title="About">
+          <Group gap={14}>
+            <img src={logoUrl} alt="Apogee" width={40} height={40} />
+            <div>
+              <Text fw={700} size="md" style={{ fontFamily: '"Space Grotesk", sans-serif' }}>
+                Apogee
+              </Text>
+              <Text size="sm" c="dimmed">
+                {appVersion ? `Version ${appVersion}` : 'Xtream Codes radio player'}
+              </Text>
+            </div>
+          </Group>
+        </Card>
+
         <Card title="Xtream connection">
           <TextInput label="Xtream base URL" placeholder="http://host:port" value={baseUrl} onChange={(e) => setBaseUrl(e.currentTarget.value)} />
           <Group grow>
@@ -178,12 +192,6 @@ export function Settings() {
           />
         </Card>
 
-        <Group justify="flex-end">
-          <Button onClick={handleSave} disabled={!categoryId}>
-            Save
-          </Button>
-        </Group>
-
         <Card title="Updates">
           <Select
             label="Update channel"
@@ -204,19 +212,11 @@ export function Settings() {
           </Group>
         </Card>
 
-        <Card title="About">
-          <Group gap={14}>
-            <img src={logoUrl} alt="Apogee" width={40} height={40} />
-            <div>
-              <Text fw={700} size="md" style={{ fontFamily: '"Space Grotesk", sans-serif' }}>
-                Apogee
-              </Text>
-              <Text size="sm" c="dimmed">
-                {appVersion ? `Version ${appVersion}` : 'Xtream Codes radio player'}
-              </Text>
-            </div>
-          </Group>
-        </Card>
+        <Group justify="flex-end">
+          <Button onClick={handleSave} disabled={!categoryId}>
+            Save
+          </Button>
+        </Group>
       </div>
     </div>
   );
