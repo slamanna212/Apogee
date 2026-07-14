@@ -18,6 +18,7 @@ export interface Settings {
   keepMiniWindowOnTop: boolean;
   onboardingComplete: boolean;
   onboardingStep: number;
+  verboseLogging: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -34,6 +35,7 @@ export const DEFAULT_SETTINGS: Settings = {
   keepMiniWindowOnTop: true,
   onboardingComplete: false,
   onboardingStep: 0,
+  verboseLogging: false,
 };
 
 type PersistedSettings = Omit<Settings, 'password' | 'stellarApiKey'>;

@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { MantineProvider } from '@mantine/core';
+import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { currentMonitor, primaryMonitor } from '@tauri-apps/api/window';
 import { PhysicalPosition, PhysicalSize } from '@tauri-apps/api/dpi';
 import { IconApps, IconHistory, IconHome2, IconMinus, IconSettings, IconSquare, IconStar, IconX } from '@tabler/icons-react';
+import { error as logError } from '@tauri-apps/plugin-log';
 import logoUrl from './assets/logo.svg';
 import { theme, cssVariablesResolver } from './theme';
 import { useSettingsStore } from './stores/settingsStore';
@@ -181,6 +183,13 @@ function AppContent() {
   }, [settingsLoaded]);
 
   useEffect(() => {
+    if (settingsLoaded) {
+      invoke('set_log_level', { verbose: settings.verboseLogging }).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsLoaded]);
+
+  useEffect(() => {
     if (!settingsLoaded) return;
     const timer = setTimeout(() => {
       void useUpdateStore.getState().checkForUpdates(settings.updateChannel);
@@ -323,7 +332,7 @@ function AppContent() {
       );
       if (libraryLoaded) recordPlay(channel.stream_id);
     } catch (err) {
-      console.error('playback failed', err);
+      logError(`playback failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -457,7 +466,7 @@ function AppContent() {
             errorMessage={errorMessage}
             onPlayStop={() => {
               const action = playerStatus === 'playing' || playerStatus === 'loading' ? stop() : play();
-              action.catch((err) => console.error('play/stop failed', err));
+              action.catch((err) => logError(`play/stop failed: ${err instanceof Error ? err.message : String(err)}`));
             }}
             onVolumeChange={setVolume}
             compactVolumePopover={!browserOpen}

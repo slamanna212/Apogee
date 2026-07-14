@@ -96,6 +96,36 @@ async fn stderr_tail_string(tail: &Arc<Mutex<VecDeque<String>>>) -> String {
     tail.lock().await.iter().cloned().collect::<Vec<_>>().join(" | ")
 }
 
+/// Masks the Xtream username/password segment of a stream URL
+/// (`{baseUrl}/live/{user}/{pass}/{streamId}{extension}`) so debug logging of
+/// commands/URLs can't leak credentials into the exported log file.
+fn redact_credentials(url: &str) -> String {
+    let Some((prefix, rest)) = url.split_once("/live/") else {
+        return url.to_string();
+    };
+    let mut parts = rest.splitn(3, '/');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(_user), Some(_pass), Some(tail)) => format!("{prefix}/live/***/***/{tail}"),
+        _ => format!("{prefix}/live/***"),
+    }
+}
+
+/// Renders an mpv IPC command for debug logging, redacting the URL argument
+/// of a `loadfile` command via `redact_credentials`.
+fn describe_command_for_log(cmd: &Value) -> String {
+    let mut cmd = cmd.clone();
+    if let Some(arr) = cmd.get_mut("command").and_then(|c| c.as_array_mut()) {
+        if arr.first().and_then(|v| v.as_str()) == Some("loadfile") {
+            if let Some(url) = arr.get_mut(1) {
+                if let Some(s) = url.as_str() {
+                    *url = Value::String(redact_credentials(s));
+                }
+            }
+        }
+    }
+    cmd.to_string()
+}
+
 /// Kills the mpv child process, if any, without needing an async context.
 /// Tauri's shutdown path (`RunEvent::Exit`) is synchronous and typically ends
 /// in `std::process::exit`, which skips Drop impls - so `kill_on_drop` on the
@@ -283,11 +313,13 @@ async fn ensure_started(app: &AppHandle, state: &MpvState) -> Result<(), String>
 
     let mpv_path = resolve_mpv_path(app);
     let mut child = spawn_mpv(&mpv_path).map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
+        let message = if e.kind() == std::io::ErrorKind::NotFound {
             "mpv not found - install it (macOS: `brew install mpv`; Linux: install the `mpv` package) and restart Apogee".to_string()
         } else {
             format!("failed to spawn mpv: {e}")
-        }
+        };
+        log::error!("{message}");
+        message
     })?;
 
     if let Some(stderr) = child.stderr.take() {
@@ -306,7 +338,9 @@ async fn ensure_started(app: &AppHandle, state: &MpvState) -> Result<(), String>
         if let Ok(Some(status)) = child.try_wait() {
             let tail = stderr_tail_string(&state.stderr_tail).await;
             let suffix = if tail.is_empty() { String::new() } else { format!(" - {tail}") };
-            return Err(format!("mpv exited immediately (status: {status}){suffix}"));
+            let message = format!("mpv exited immediately (status: {status}){suffix}");
+            log::error!("{message}");
+            return Err(message);
         }
         match connect_ipc(IPC_PATH).await {
             Ok(s) => {
@@ -322,20 +356,48 @@ async fn ensure_started(app: &AppHandle, state: &MpvState) -> Result<(), String>
             let _ = child.start_kill();
             let tail = stderr_tail_string(&state.stderr_tail).await;
             let suffix = if tail.is_empty() { String::new() } else { format!(" - mpv output: {tail}") };
-            return Err(format!("timed out connecting to mpv IPC{suffix}"));
+            let message = format!("timed out connecting to mpv IPC{suffix}");
+            log::error!("{message}");
+            return Err(message);
         }
     };
 
     let (read_half, write_half) = tokio::io::split(stream);
 
     let app_clone = app.clone();
+    let inner_for_reader = state.inner.clone();
+    let stderr_tail_for_reader = state.stderr_tail.clone();
     tokio::spawn(async move {
         let mut lines = BufReader::new(read_half).lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            if let Ok(value) = serde_json::from_str::<Value>(&line) {
-                let _ = app_clone.emit("mpv-event", value);
+            match serde_json::from_str::<Value>(&line) {
+                Ok(value) => {
+                    // Every message mpv sends over IPC (property changes,
+                    // pause/unpause, playback-restart, end-file, etc.) - the
+                    // none-observed properties this doesn't cover are the
+                    // main blind spot when chasing an intermittent playback
+                    // issue, so log all of it at debug level rather than
+                    // only the handful of events the frontend acts on.
+                    log::debug!("mpv event: {value}");
+                    let _ = app_clone.emit("mpv-event", value);
+                }
+                Err(e) => log::warn!("failed to parse mpv IPC line as JSON: {e} - line: {line}"),
             }
         }
+
+        // The loop above only ends when mpv's process exited or the IPC
+        // socket errored/closed - there is no separate task watching the
+        // child's exit status once the initial connect handshake succeeds.
+        // Without this, a mid-playback mpv crash left the frontend stuck on
+        // status: 'playing' forever (no event, no log) and left the stale
+        // `Inner` (dead child + closed writer) in place, so the next
+        // mpv_load call would silently fail in send_command instead of
+        // respawning mpv.
+        let tail = stderr_tail_string(&stderr_tail_for_reader).await;
+        let suffix = if tail.is_empty() { String::new() } else { format!(" - {tail}") };
+        log::error!("mpv IPC connection closed unexpectedly{suffix}");
+        *inner_for_reader.lock().await = None;
+        let _ = app_clone.emit("mpv-event", json!({ "event": "apogee-ipc-closed" }));
     });
 
     *guard = Some(Inner {
@@ -345,24 +407,32 @@ async fn ensure_started(app: &AppHandle, state: &MpvState) -> Result<(), String>
     drop(guard);
 
     send_command(state, json!({ "command": ["observe_property", 1, "audio-bitrate"] })).await?;
+    // core-idle (stalled waiting for data) and eof-reached surface rebuffering
+    // /stall conditions mid-playback as debug-level property-change events -
+    // the main signal this was missing for chasing intermittent Mac issues
+    // that don't produce a hard error, just dead air.
+    send_command(state, json!({ "command": ["observe_property", 2, "core-idle"] })).await?;
+    send_command(state, json!({ "command": ["observe_property", 3, "eof-reached"] })).await?;
 
     Ok(())
 }
 
 async fn send_command(state: &MpvState, cmd: Value) -> Result<(), String> {
+    log::debug!("mpv command: {}", describe_command_for_log(&cmd));
     let mut guard = state.inner.lock().await;
     let inner = guard.as_mut().ok_or_else(|| "mpv not started".to_string())?;
     let mut payload = cmd.to_string();
     payload.push('\n');
-    inner
-        .writer
-        .write_all(payload.as_bytes())
-        .await
-        .map_err(|e| format!("failed to write to mpv IPC: {e}"))
+    inner.writer.write_all(payload.as_bytes()).await.map_err(|e| {
+        let message = format!("failed to write to mpv IPC: {e}");
+        log::error!("{message}");
+        message
+    })
 }
 
 #[tauri::command]
 pub async fn mpv_load(app: AppHandle, state: State<'_, MpvState>, url: String) -> Result<(), String> {
+    log::debug!("mpv_load: {}", redact_credentials(&url));
     ensure_started(&app, &state).await?;
     send_command(&state, json!({ "command": ["loadfile", url, "replace"] })).await
 }

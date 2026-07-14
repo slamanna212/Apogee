@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { debug as logDebug, info as logInfo, warn as logWarn, error as logError } from '@tauri-apps/plugin-log';
 import type { XtreamChannel } from '../types/xtream';
 import type { PlayerState } from '../types/player';
 import {
@@ -12,6 +13,25 @@ import {
 } from '../lib/mpvClient';
 import { buildStreamUrl, type XtreamCredentials } from '../lib/xtream';
 import { onMediaControlEvent, setMediaPlayback } from '../lib/mediaSession';
+
+// Plain console.* calls only reach a devtools console (invisible in a
+// production build) - @tauri-apps/plugin-log's functions instead invoke the
+// Rust log plugin's `log` command, so they land in the same exportable log
+// file as the mpv/backend output. Use these for anything worth keeping.
+
+// While status is 'playing', periodically log the current bitrate at debug
+// level so a stretch of silence (no heartbeat) in the log is itself a signal
+// something stalled, even when mpv never reports a hard error - the main gap
+// for chasing intermittent Mac playback issues that just go quiet.
+const HEARTBEAT_INTERVAL_MS = 15_000;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+function stopHeartbeat() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
 
 interface PlayerActions {
   initEventListener: () => void;
@@ -71,11 +91,27 @@ function stopConnectTimeout() {
 }
 
 export const usePlayerStore = create<PlayerStore>((set, get) => {
+  function startHeartbeat(streamId: number) {
+    stopHeartbeat();
+    heartbeatTimer = setInterval(() => {
+      const state = get();
+      if (state.status !== 'playing' || state.currentChannel?.stream_id !== streamId) {
+        stopHeartbeat();
+        return;
+      }
+      logDebug(`heartbeat: channel ${state.currentChannel?.name ?? streamId} playing, bitrate=${state.bitrateKbps ?? 'unknown'}kbps`);
+    }, HEARTBEAT_INTERVAL_MS);
+  }
+
   async function connect(url: string, streamId: number) {
     stopFallbackPolling();
     stopConnectTimeout();
+    stopHeartbeat();
     lastStreamUrl = url;
     set({ status: 'loading', bitrateKbps: null, errorMessage: null });
+    // Never log `url` itself - it embeds the Xtream username/password
+    // (see buildStreamUrl), and this ends up in an exportable log file.
+    logInfo(`connecting to channel ${get().currentChannel?.name ?? streamId} (attempt ${connectAttempt + 1}/${MAX_CONNECT_ATTEMPTS})`);
     try {
       await loadUrl(url);
       await mpvSetVolume(get().volume);
@@ -98,6 +134,7 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
       }, 3000);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      logError(`connect failed for channel ${get().currentChannel?.name ?? streamId}: ${message}`);
       set({ status: 'error', errorMessage: message });
       throw err;
     }
@@ -112,6 +149,7 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
     if (get().currentChannel?.stream_id !== streamId || get().status !== 'loading') return;
     stopConnectTimeout();
     connectAttempt += 1;
+    logWarn(`connect attempt ${connectAttempt}/${MAX_CONNECT_ATTEMPTS} failed for channel ${get().currentChannel?.name ?? streamId}`);
 
     if (connectAttempt < MAX_CONNECT_ATTEMPTS) {
       await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
@@ -122,10 +160,9 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
 
     const tail = await getStderrTail().catch(() => '');
     const suffix = tail ? ` - ${tail}` : '';
-    set({
-      status: 'error',
-      errorMessage: `Failed to connect after ${MAX_CONNECT_ATTEMPTS} attempts${suffix}`,
-    });
+    const errorMessage = `Failed to connect after ${MAX_CONNECT_ATTEMPTS} attempts${suffix}`;
+    logError(errorMessage);
+    set({ status: 'error', errorMessage });
   }
 
   return {
@@ -139,16 +176,41 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
       if (listening) return;
       listening = true;
       onMpvEvent((event) => {
+        // Every mpv IPC message, not just the handful acted on below - the
+        // main visibility gap when chasing an intermittent stall that never
+        // produces a hard 'error'. Debug level only (enable via Settings >
+        // Diagnostics > Verbose logging), so this doesn't spam by default.
+        logDebug(`mpv event: ${JSON.stringify(event)}`);
+
         if (event.event === 'playback-restart') {
           if (get().status === 'loading') {
+            const channel = get().currentChannel;
+            logInfo(`playback started for channel ${channel?.name ?? channel?.stream_id}`);
             stopConnectTimeout();
             set({ status: 'playing' });
             setMediaPlayback(true);
+            if (channel) startHeartbeat(channel.stream_id);
+          }
+        } else if (event.event === 'apogee-ipc-closed') {
+          // Emitted by the Rust side when mpv's process dies or the IPC
+          // socket closes mid-playback (e.g. an mpv crash) - without this,
+          // the UI would stay stuck showing 'playing' with dead audio and
+          // no error. Reconnect fresh rather than routing through the
+          // bounded initial-connect retry counter, since this can happen
+          // long after a successful connect.
+          const channel = get().currentChannel;
+          logError(`mpv connection lost for channel ${channel?.name ?? channel?.stream_id}`);
+          stopHeartbeat();
+          if ((get().status === 'playing' || get().status === 'loading') && channel && lastStreamUrl) {
+            connectAttempt = 0;
+            connect(lastStreamUrl, channel.stream_id);
           }
         } else if (event.event === 'end-file') {
           const channel = get().currentChannel;
           if (event.reason === 'error' && get().status === 'loading' && channel && lastStreamUrl) {
             handleFailedAttempt(lastStreamUrl, channel.stream_id);
+          } else if (event.reason && event.reason !== 'eof' && event.reason !== 'stop' && event.reason !== 'quit') {
+            logWarn(`unexpected mpv end-file reason "${event.reason}" while status was ${get().status}`);
           }
         } else if (event.event === 'property-change' && event.name === 'audio-bitrate') {
           const bits = typeof event.data === 'number' ? event.data : null;
@@ -191,8 +253,10 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
     },
 
     async stop() {
+      logInfo(`stopping channel ${get().currentChannel?.name ?? get().currentChannel?.stream_id}`);
       stopFallbackPolling();
       stopConnectTimeout();
+      stopHeartbeat();
       connectAttempt = 0;
       await stopPlayback();
       set({ status: 'stopped', bitrateKbps: null });

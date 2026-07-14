@@ -29,13 +29,27 @@ pub fn run() {
       updater::check_update_at_endpoint,
       updater::download_and_install_update,
       logs::export_log_file,
+      logs::set_log_level,
     ])
     .setup(|app| {
       app.handle().plugin(
         tauri_plugin_log::Builder::default()
-          .level(log::LevelFilter::Info)
+          // The dispatch filter is fixed once at build time, so this is
+          // deliberately permissive (Debug) - the actual default runtime
+          // level is set right below via log::set_max_level(Info), and
+          // logs::set_log_level flips that global gate at runtime when the
+          // user turns on verbose logging in Settings to chase down
+          // intermittent playback issues (e.g. on Mac).
+          .level(log::LevelFilter::Debug)
+          // Defaults (40 KB / KeepOne) rotate by deleting the log outright,
+          // which can wipe the exact window a playback error happened in
+          // before a user gets a chance to download it. Keep more headroom
+          // and history instead.
+          .max_file_size(5 * 1024 * 1024)
+          .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5))
           .build(),
       )?;
+      log::set_max_level(log::LevelFilter::Info);
 
       #[cfg(desktop)]
       app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;

@@ -238,6 +238,16 @@ export function Settings() {
         </Card>
 
         <Card title="Diagnostics">
+          <Switch
+            label="Verbose logging"
+            description="Logs every mpv event, command, and a periodic playback heartbeat - turn on before reproducing a playback issue, then download the log below"
+            checked={settings.verboseLogging}
+            onChange={(e) => {
+              const verbose = e.currentTarget.checked;
+              updateSettings({ verboseLogging: verbose });
+              invoke('set_log_level', { verbose });
+            }}
+          />
           <Group align="center">
             <Button onClick={handleDownloadLog} loading={logExportStatus === 'saving'}>
               Download log file
