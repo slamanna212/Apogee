@@ -3,11 +3,12 @@ use rustfft::{Fft, FftPlanner};
 use std::io::ErrorKind;
 use std::process::Stdio;
 use std::sync::OnceLock;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
+use tokio::sync::mpsc;
 
-const SAMPLE_RATE: u32 = 44100;
 const WINDOW_SIZE: usize = 1024;
 /// 8 bands, log-spaced across the audible range.
 const BAND_EDGES_HZ: [f32; 9] = [20.0, 150.0, 400.0, 1000.0, 2000.0, 4000.0, 8000.0, 12000.0, 20000.0];
@@ -77,6 +78,33 @@ const VOLUME_TARGET_DB: f32 = -40.0;
 /// resumes instead of correcting from an extreme.
 const VOLUME_TRACKER_MIN_ACTIVITY_DB: f32 = -75.0;
 
+/// Retry backoff for (re)opening a capture source: short delays at first so
+/// a transient hiccup (sink switch, PipeWire restart, a device momentarily
+/// disappearing) recovers in a few seconds, capped so a platform/session
+/// with no capture backend at all doesn't spin or spam logs.
+const RETRY_DELAYS_SECONDS: [u64; 5] = [1, 2, 5, 10, 30];
+const RETRY_DELAY_CEILING_SECONDS: u64 = 60;
+
+struct RetryBackoff {
+    attempt: usize,
+}
+
+impl RetryBackoff {
+    fn new() -> Self {
+        Self { attempt: 0 }
+    }
+
+    fn reset(&mut self) {
+        self.attempt = 0;
+    }
+
+    fn next_delay(&mut self) -> Duration {
+        let seconds = RETRY_DELAYS_SECONDS.get(self.attempt).copied().unwrap_or(RETRY_DELAY_CEILING_SECONDS);
+        self.attempt += 1;
+        Duration::from_secs(seconds)
+    }
+}
+
 struct VolumeTracker {
     avg_db: f32,
 }
@@ -131,9 +159,9 @@ static STARTED: OnceLock<()> = OnceLock::new();
 /// level, since ffmpeg's amix/merge filters drop per-branch metadata), runs
 /// an FFT over a rolling window, and emits normalized per-band levels on
 /// "waveform-levels". If no capture backend is available (e.g. no
-/// PipeWire/PulseAudio, or on platforms without one implemented yet), this
-/// silently does nothing and the frontend keeps its synthetic fallback
-/// animation.
+/// PipeWire/PulseAudio on Linux, no default output device, or audio-capture
+/// permission denied on macOS), this retries in the background with backoff
+/// and the frontend keeps its synthetic fallback animation in the meantime.
 pub fn ensure_started(app: &AppHandle) {
     if STARTED.set(()).is_err() {
         return;
@@ -147,8 +175,86 @@ pub fn ensure_started(app: &AppHandle) {
     });
 }
 
+/// A live capture source: mono samples at `sample_rate` arrive on `rx` for as
+/// long as the platform-specific capture thread/process stays healthy. When
+/// it ends (device change, process died, transient error), `rx` closes and
+/// `run_capture_loop` reopens a fresh source after a backoff delay.
+struct CaptureSource {
+    rx: mpsc::Receiver<Vec<f32>>,
+    sample_rate: u32,
+    backend_name: &'static str,
+}
+
+async fn run_capture_loop(app: AppHandle) {
+    let mut backoff = RetryBackoff::new();
+    loop {
+        match open_capture_source().await {
+            Ok(CaptureSource { rx, sample_rate, backend_name }) => {
+                log::info!("waveform: capturing via {backend_name} at {sample_rate}Hz");
+                backoff.reset();
+                process_samples(&app, rx, sample_rate).await;
+                log::warn!("waveform: capture source ({backend_name}) ended, retrying");
+            }
+            Err(e) => {
+                log::warn!("waveform: no audio capture backend available right now ({e}), retrying");
+            }
+        }
+        tokio::time::sleep(backoff.next_delay()).await;
+    }
+}
+
+/// Consumes mono sample chunks from `rx`, running the shared FFT -> tilt
+/// compensation -> volume offset -> smoothing -> emit pipeline, accumulating
+/// chunks into fixed `WINDOW_SIZE` windows regardless of how the upstream
+/// source happened to batch them.
+async fn process_samples(app: &AppHandle, mut rx: mpsc::Receiver<Vec<f32>>, sample_rate: u32) {
+    let mut planner = FftPlanner::<f32>::new();
+    let fft = planner.plan_fft_forward(WINDOW_SIZE);
+    let band_bins = band_bin_ranges(sample_rate);
+    let mut smoother = LevelSmoother::new(band_bins.len());
+    let mut volume_tracker = VolumeTracker::new();
+    let frame_seconds = WINDOW_SIZE as f32 / sample_rate as f32;
+
+    let mut window: Vec<f32> = Vec::with_capacity(WINDOW_SIZE);
+    while let Some(chunk) = rx.recv().await {
+        window.extend_from_slice(&chunk);
+        while window.len() >= WINDOW_SIZE {
+            let samples: Vec<f32> = window.drain(..WINDOW_SIZE).collect();
+
+            let band_db = compute_band_db(&samples, fft.as_ref(), &band_bins);
+            let tilt_compensated: Vec<f32> =
+                band_db.iter().enumerate().map(|(i, &db)| db + BAND_TILT_COMPENSATION_DB[i]).collect();
+            let volume_offset = volume_tracker.offset(&tilt_compensated, frame_seconds);
+            let targets: Vec<f32> = tilt_compensated.iter().map(|&db| level_from_range(db + volume_offset)).collect();
+            let levels = smoother.smooth(&targets, frame_seconds);
+            let _ = app.emit("waveform-levels", levels);
+        }
+    }
+}
+
+async fn open_capture_source() -> std::io::Result<CaptureSource> {
+    #[cfg(target_os = "linux")]
+    {
+        open_linux_capture_source().await
+    }
+    #[cfg(target_os = "windows")]
+    {
+        open_windows_capture_source().await
+    }
+    #[cfg(target_os = "macos")]
+    {
+        open_macos_capture_source().await
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+    {
+        Err(std::io::Error::new(ErrorKind::Unsupported, "audio loopback capture not implemented on this OS"))
+    }
+}
+
+const LINUX_SAMPLE_RATE: u32 = 44100;
+
 #[cfg(target_os = "linux")]
-async fn spawn_capture_process() -> std::io::Result<Child> {
+async fn spawn_capture_process() -> std::io::Result<(Child, &'static str)> {
     // This app's own dev/test environment runs PipeWire (pw-record); classic
     // PulseAudio-only systems get parec as a fallback.
     let pw_record = Command::new("pw-record")
@@ -156,7 +262,7 @@ async fn spawn_capture_process() -> std::io::Result<Child> {
             "--target=@DEFAULT_AUDIO_SINK@",
             "--media-category=Capture",
             "--media-role=Music",
-            &format!("--rate={SAMPLE_RATE}"),
+            &format!("--rate={LINUX_SAMPLE_RATE}"),
             "--channels=1",
             "--format=s16",
             "--raw",
@@ -168,11 +274,11 @@ async fn spawn_capture_process() -> std::io::Result<Child> {
         .spawn();
 
     match pw_record {
-        Ok(child) => Ok(child),
+        Ok(child) => Ok((child, "pw-record")),
         Err(e) if e.kind() == ErrorKind::NotFound => Command::new("parec")
             .args([
                 "--device=@DEFAULT_SINK@.monitor",
-                &format!("--rate={SAMPLE_RATE}"),
+                &format!("--rate={LINUX_SAMPLE_RATE}"),
                 "--format=s16le",
                 "--channels=1",
                 "--raw",
@@ -180,61 +286,44 @@ async fn spawn_capture_process() -> std::io::Result<Child> {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true)
-            .spawn(),
+            .spawn()
+            .map(|child| (child, "parec")),
         Err(e) => Err(e),
     }
 }
 
-/// No loopback-capture backend implemented yet for this platform - the
-/// frontend's synthetic fallback animation covers it in the meantime.
-#[cfg(not(target_os = "linux"))]
-async fn spawn_capture_process() -> std::io::Result<Child> {
-    Err(std::io::Error::new(ErrorKind::Unsupported, "audio loopback capture not implemented on this OS"))
-}
-
-async fn run_capture_loop(app: AppHandle) {
-    let mut child = match spawn_capture_process().await {
-        Ok(c) => c,
-        Err(e) => {
-            log::warn!("waveform: no audio capture backend available ({e}) - using synthetic animation instead");
-            return;
-        }
-    };
+#[cfg(target_os = "linux")]
+async fn open_linux_capture_source() -> std::io::Result<CaptureSource> {
+    let (mut child, backend_name) = spawn_capture_process().await?;
     let Some(mut stdout) = child.stdout.take() else {
-        return;
+        return Err(std::io::Error::other("pw-record/parec spawned without a stdout pipe"));
     };
 
-    let mut planner = FftPlanner::<f32>::new();
-    let fft = planner.plan_fft_forward(WINDOW_SIZE);
-    let band_bins = band_bin_ranges();
-    let mut byte_buf = vec![0u8; WINDOW_SIZE * 2];
-    let mut smoother = LevelSmoother::new(band_bins.len());
-    let mut volume_tracker = VolumeTracker::new();
-    let frame_seconds = WINDOW_SIZE as f32 / SAMPLE_RATE as f32;
-
-    loop {
-        if stdout.read_exact(&mut byte_buf).await.is_err() {
-            break;
+    let (tx, rx) = mpsc::channel::<Vec<f32>>(4);
+    tokio::spawn(async move {
+        // Keep the child alive for the duration of the reader loop; it's
+        // killed on drop (kill_on_drop) once this task ends.
+        let _child = child;
+        let mut byte_buf = vec![0u8; WINDOW_SIZE * 2];
+        loop {
+            if stdout.read_exact(&mut byte_buf).await.is_err() {
+                break;
+            }
+            let samples: Vec<f32> = byte_buf
+                .chunks_exact(2)
+                .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0)
+                .collect();
+            if tx.send(samples).await.is_err() {
+                break;
+            }
         }
-        let samples: Vec<f32> = byte_buf
-            .chunks_exact(2)
-            .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0)
-            .collect();
+    });
 
-        let band_db = compute_band_db(&samples, fft.as_ref(), &band_bins);
-        let tilt_compensated: Vec<f32> =
-            band_db.iter().enumerate().map(|(i, &db)| db + BAND_TILT_COMPENSATION_DB[i]).collect();
-        let volume_offset = volume_tracker.offset(&tilt_compensated, frame_seconds);
-        let targets: Vec<f32> = tilt_compensated.iter().map(|&db| level_from_range(db + volume_offset)).collect();
-        let levels = smoother.smooth(&targets, frame_seconds);
-        let _ = app.emit("waveform-levels", levels);
-    }
-
-    let _ = child.kill().await;
+    Ok(CaptureSource { rx, sample_rate: LINUX_SAMPLE_RATE, backend_name })
 }
 
-fn band_bin_ranges() -> Vec<(usize, usize)> {
-    let bin_hz = SAMPLE_RATE as f32 / WINDOW_SIZE as f32;
+fn band_bin_ranges(sample_rate: u32) -> Vec<(usize, usize)> {
+    let bin_hz = sample_rate as f32 / WINDOW_SIZE as f32;
     let nyquist_bin = WINDOW_SIZE / 2;
     BAND_EDGES_HZ
         .windows(2)
@@ -273,3 +362,13 @@ fn compute_band_db(samples: &[f32], fft: &dyn Fft<f32>, band_bins: &[(usize, usi
         })
         .collect()
 }
+
+#[cfg(target_os = "windows")]
+mod windows_capture;
+#[cfg(target_os = "windows")]
+use windows_capture::open_windows_capture_source;
+
+#[cfg(target_os = "macos")]
+mod macos_capture;
+#[cfg(target_os = "macos")]
+use macos_capture::open_macos_capture_source;
