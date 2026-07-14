@@ -1,6 +1,6 @@
 import { useMemo, useRef, type ReactNode } from 'react';
 import { IconLayoutGrid, IconLayoutList } from '@tabler/icons-react';
-import { ChannelCard } from './ChannelCard';
+import { ChannelCard, CHANNEL_CARD_MIN_WIDTH, CHANNEL_CARD_GAP } from './ChannelCard';
 import { ChannelListRow } from './ChannelListRow';
 import { JumpRail } from './JumpRail';
 import type { XtreamChannel } from '../types/xtream';
@@ -138,7 +138,7 @@ export function ChannelGrid({
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <div ref={containerRef} style={{ flex: 1, overflowY: 'auto', paddingRight: 20 }}>
             {viewMode === 'grid' ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 22 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${CHANNEL_CARD_MIN_WIDTH}px, 1fr))`, gap: CHANNEL_CARD_GAP }}>
                 {sorted.map((channel) => (
                   <ChannelCard
                     key={channel.stream_id}

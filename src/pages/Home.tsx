@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { Text } from '@mantine/core';
 import { useChannelStore } from '../stores/channelStore';
 import { useLibraryStore } from '../stores/libraryStore';
-import { ChannelCard } from '../components/ChannelCard';
+import { ChannelCard, CHANNEL_CARD_MIN_WIDTH, CHANNEL_CARD_GAP } from '../components/ChannelCard';
 import { buildRecommendationRows, getAllGenres, rankPersonalizedGenres, shuffleGenres } from '../lib/recommendations';
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel } from '../types/stellarTunerLog';
@@ -26,9 +26,9 @@ function Row({ title, subtitle, channels, channelMetadata, favorites, onToggleFa
         {title}
         {subtitle && <span style={{ color: 'var(--app-dim2)', fontWeight: 400 }}> — {subtitle}</span>}
       </div>
-      <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 22 }}>
+      <div style={{ display: 'flex', gap: CHANNEL_CARD_GAP, overflowX: 'auto', paddingBottom: 22 }}>
         {channels.map((channel) => (
-          <div key={channel.stream_id} style={{ width: 140, flex: 'none' }}>
+          <div key={channel.stream_id} style={{ width: CHANNEL_CARD_MIN_WIDTH, flex: 'none' }}>
             <ChannelCard
               channel={channel}
               metadata={channelMetadata.get(channel.stream_id)}

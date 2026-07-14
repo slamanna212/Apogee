@@ -3,6 +3,9 @@ import { IconInfoSmall, IconStar, IconStarFilled } from '@tabler/icons-react';
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel } from '../types/stellarTunerLog';
 
+export const CHANNEL_CARD_MIN_WIDTH = 180;
+export const CHANNEL_CARD_GAP = 22;
+
 export const GRADIENTS: [string, string][] = [
   ['#ff7a5c', '#8b6bff'],
   ['#45e0d8', '#5c7cfa'],
