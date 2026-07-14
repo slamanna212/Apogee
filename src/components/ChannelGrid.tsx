@@ -22,6 +22,7 @@ interface ChannelGridProps {
   onViewModeChange: (mode: ViewMode) => void;
   nowPlaying?: Map<number, StellarStation>;
   emptyState?: ReactNode;
+  currentChannelId?: number;
 }
 
 export function ChannelGrid({
@@ -38,6 +39,7 @@ export function ChannelGrid({
   onViewModeChange,
   nowPlaying,
   emptyState,
+  currentChannelId,
 }: ChannelGridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const favoriteSet = useMemo(() => new Set(favorites), [favorites]);
@@ -136,7 +138,7 @@ export function ChannelGrid({
         emptyState
       ) : (
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-          <div ref={containerRef} style={{ flex: 1, overflowY: 'auto', paddingRight: 20 }}>
+          <div ref={containerRef} style={{ flex: 1, overflowY: 'auto', padding: '4px 20px 4px 4px' }}>
             {viewMode === 'grid' ? (
               <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${CHANNEL_CARD_MIN_WIDTH}px, 1fr))`, gap: CHANNEL_CARD_GAP }}>
                 {sorted.map((channel) => (
@@ -145,6 +147,7 @@ export function ChannelGrid({
                     channel={channel}
                     metadata={channelMetadata.get(channel.stream_id)}
                     isFavorite={favoriteSet.has(channel.stream_id)}
+                    isPlaying={channel.stream_id === currentChannelId}
                     onToggleFavorite={() => onToggleFavorite(channel.stream_id)}
                     onClick={() => onPlay(channel.stream_id)}
                     onInfo={() => onSelect(channel.stream_id)}
@@ -159,6 +162,7 @@ export function ChannelGrid({
                     channel={channel}
                     metadata={channelMetadata.get(channel.stream_id)}
                     isFavorite={favoriteSet.has(channel.stream_id)}
+                    isPlaying={channel.stream_id === currentChannelId}
                     onToggleFavorite={() => onToggleFavorite(channel.stream_id)}
                     onClick={() => onPlay(channel.stream_id)}
                     onInfo={() => onSelect(channel.stream_id)}

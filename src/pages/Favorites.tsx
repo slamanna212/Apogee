@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Text } from '@mantine/core';
 import { useChannelStore } from '../stores/channelStore';
 import { useLibraryStore } from '../stores/libraryStore';
+import { usePlayerStore } from '../stores/playerStore';
 import { ChannelGrid } from '../components/ChannelGrid';
 
 interface FavoritesProps {
@@ -19,6 +20,7 @@ export function Favorites({ onSelectChannel, onPlayChannel }: FavoritesProps) {
   const viewMode = useLibraryStore((s) => s.viewMode);
   const setViewMode = useLibraryStore((s) => s.setViewMode);
   const toggleFavorite = useLibraryStore((s) => s.toggleFavorite);
+  const currentChannelId = usePlayerStore((s) => s.currentChannel?.stream_id);
 
   const channels = useMemo(
     () => allChannels.filter((c) => favorites.includes(c.stream_id)),
@@ -39,6 +41,7 @@ export function Favorites({ onSelectChannel, onPlayChannel }: FavoritesProps) {
       onToggleFavorite={toggleFavorite}
       onSelect={onSelectChannel}
       onPlay={onPlayChannel}
+      currentChannelId={currentChannelId}
       emptyState={<Text c="dimmed">Hover any channel and tap the star to save it here.</Text>}
     />
   );

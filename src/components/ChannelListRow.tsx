@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { Text, useComputedColorScheme } from '@mantine/core';
-import { IconInfoCircle, IconStar, IconStarFilled } from '@tabler/icons-react';
+import { IconInfoCircle, IconPlayerPlayFilled, IconStar, IconStarFilled } from '@tabler/icons-react';
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel, StellarStation } from '../types/stellarTunerLog';
 import { CutTypeBadge } from './CutTypeBadge';
@@ -9,6 +10,7 @@ interface ChannelListRowProps {
   channel: XtreamChannel;
   metadata?: StellarChannel;
   isFavorite: boolean;
+  isPlaying?: boolean;
   onToggleFavorite: () => void;
   onClick: () => void;
   onInfo: () => void;
@@ -19,11 +21,15 @@ export function ChannelListRow({
   channel,
   metadata,
   isFavorite,
+  isPlaying,
   onToggleFavorite,
   onClick,
   onInfo,
   nowPlaying,
 }: ChannelListRowProps) {
+  const [hovered, setHovered] = useState(false);
+  const [actionHovered, setActionHovered] = useState(false);
+  const showPlayButton = hovered && !actionHovered;
   const colorScheme = useComputedColorScheme('dark');
   const name = metadata?.marketing_name || channel.name;
   const number = metadata?.channel_number ?? channel.num;
@@ -35,25 +41,48 @@ export function ChannelListRow({
   return (
     <div
       onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       role="button"
       style={{
         display: 'flex',
         alignItems: 'center',
         gap: 16,
-        background: 'var(--app-panel)',
-        border: '1px solid var(--app-border)',
+        background: isPlaying ? 'var(--app-accent-soft)' : 'var(--app-panel)',
+        border: `1px solid ${isPlaying ? 'var(--app-accent)' : 'var(--app-border)'}`,
         borderRadius: 16,
         padding: '6px 14px',
         cursor: 'pointer',
       }}
     >
       <div style={{ width: 92, flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-        <div style={{ width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'relative', width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {logoUrl ? (
             <img src={logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           ) : (
             <div style={{ width: '70%', height: '70%', borderRadius: 8, background: 'var(--app-panel2)' }} />
           )}
+          <div
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: showPlayButton ? 'translate(-50%, -50%) scale(1)' : 'translate(-50%, -50%) scale(0.85)',
+              width: 36,
+              height: 36,
+              borderRadius: '50%',
+              background: 'rgba(7,6,13,.55)',
+              backdropFilter: 'blur(6px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#fff',
+              opacity: showPlayButton ? 1 : 0,
+              transition: 'opacity 150ms, transform 150ms',
+            }}
+          >
+            <IconPlayerPlayFilled size={16} />
+          </div>
         </div>
         <Text
           size="xs"
@@ -118,6 +147,8 @@ export function ChannelListRow({
             e.stopPropagation();
             onToggleFavorite();
           }}
+          onMouseEnter={() => setActionHovered(true)}
+          onMouseLeave={() => setActionHovered(false)}
           role="button"
           aria-label={isFavorite ? 'Remove favorite' : 'Add favorite'}
           style={{
@@ -137,6 +168,8 @@ export function ChannelListRow({
             e.stopPropagation();
             onInfo();
           }}
+          onMouseEnter={() => setActionHovered(true)}
+          onMouseLeave={() => setActionHovered(false)}
           role="button"
           aria-label={`Info for ${name}`}
           style={{

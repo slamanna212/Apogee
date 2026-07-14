@@ -1,5 +1,6 @@
 import { useChannelStore } from '../stores/channelStore';
 import { useLibraryStore } from '../stores/libraryStore';
+import { usePlayerStore } from '../stores/playerStore';
 import { ChannelGrid } from '../components/ChannelGrid';
 
 interface ChannelsProps {
@@ -17,6 +18,7 @@ export function Channels({ onSelectChannel, onPlayChannel }: ChannelsProps) {
   const viewMode = useLibraryStore((s) => s.viewMode);
   const setViewMode = useLibraryStore((s) => s.setViewMode);
   const toggleFavorite = useLibraryStore((s) => s.toggleFavorite);
+  const currentChannelId = usePlayerStore((s) => s.currentChannel?.stream_id);
 
   return (
     <ChannelGrid
@@ -32,6 +34,7 @@ export function Channels({ onSelectChannel, onPlayChannel }: ChannelsProps) {
       onToggleFavorite={toggleFavorite}
       onSelect={onSelectChannel}
       onPlay={onPlayChannel}
+      currentChannelId={currentChannelId}
     />
   );
 }

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { IconInfoSmall, IconStar, IconStarFilled } from '@tabler/icons-react';
+import { IconInfoSmall, IconPlayerPlayFilled, IconStar, IconStarFilled } from '@tabler/icons-react';
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel } from '../types/stellarTunerLog';
 
@@ -28,13 +28,16 @@ interface ChannelCardProps {
   channel: XtreamChannel;
   metadata?: StellarChannel;
   isFavorite: boolean;
+  isPlaying?: boolean;
   onToggleFavorite: () => void;
   onClick: () => void;
   onInfo: () => void;
 }
 
-export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, onClick, onInfo }: ChannelCardProps) {
+export function ChannelCard({ channel, metadata, isFavorite, isPlaying, onToggleFavorite, onClick, onInfo }: ChannelCardProps) {
   const [hovered, setHovered] = useState(false);
+  const [actionHovered, setActionHovered] = useState(false);
+  const showPlayButton = hovered && !actionHovered;
   const name = metadata?.marketing_name || channel.name;
   const number = metadata?.channel_number ?? channel.num;
   const logoUrl = metadata?.logos?.color_dark_square?.url || channel.stream_icon;
@@ -54,7 +57,12 @@ export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, o
         aspectRatio: '1',
         borderRadius: 16,
         overflow: 'hidden',
-        boxShadow: hovered ? '0 8px 24px var(--app-accent-soft)' : 'none',
+        boxShadow: [
+          isPlaying ? '0 0 0 2px var(--app-accent)' : null,
+          hovered ? '0 8px 24px var(--app-accent-soft)' : null,
+        ]
+          .filter(Boolean)
+          .join(', ') || 'none',
         transition: 'box-shadow 150ms',
       }}
     >
@@ -101,6 +109,8 @@ export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, o
           e.stopPropagation();
           onToggleFavorite();
         }}
+        onMouseEnter={() => setActionHovered(true)}
+        onMouseLeave={() => setActionHovered(false)}
         role="button"
         aria-label={isFavorite ? 'Remove favorite' : 'Add favorite'}
         style={{
@@ -167,10 +177,34 @@ export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, o
         />
       )}
       <div
+        style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: showPlayButton ? 'translate(-50%, -50%) scale(1)' : 'translate(-50%, -50%) scale(0.85)',
+          width: 48,
+          height: 48,
+          borderRadius: '50%',
+          background: 'rgba(7,6,13,.55)',
+          backdropFilter: 'blur(6px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#fff',
+          opacity: showPlayButton ? 1 : 0,
+          transition: 'opacity 150ms, transform 150ms',
+          zIndex: 1,
+        }}
+      >
+        <IconPlayerPlayFilled size={20} />
+      </div>
+      <div
         onClick={(e) => {
           e.stopPropagation();
           onInfo();
         }}
+        onMouseEnter={() => setActionHovered(true)}
+        onMouseLeave={() => setActionHovered(false)}
         role="button"
         aria-label={`Info for ${name}`}
         style={{
@@ -201,7 +235,7 @@ export function ChannelCard({ channel, metadata, isFavorite, onToggleFavorite, o
         padding: '0 4px',
         textAlign: 'center',
         font: '600 15px "Space Grotesk", sans-serif',
-        color: 'var(--app-text)',
+        color: isPlaying ? 'var(--app-accent)' : 'var(--app-text)',
         lineHeight: 1.3,
         overflow: 'hidden',
         textOverflow: 'ellipsis',

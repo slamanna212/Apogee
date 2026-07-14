@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Text } from '@mantine/core';
 import { useChannelStore } from '../stores/channelStore';
 import { useLibraryStore } from '../stores/libraryStore';
+import { usePlayerStore } from '../stores/playerStore';
 import { ChannelGrid } from '../components/ChannelGrid';
 import type { XtreamChannel } from '../types/xtream';
 
@@ -19,6 +20,7 @@ export function Recent({ onSelectChannel, onPlayChannel }: RecentProps) {
   const viewMode = useLibraryStore((s) => s.viewMode);
   const setViewMode = useLibraryStore((s) => s.setViewMode);
   const toggleFavorite = useLibraryStore((s) => s.toggleFavorite);
+  const currentChannelId = usePlayerStore((s) => s.currentChannel?.stream_id);
 
   const channels = useMemo(
     () =>
@@ -40,6 +42,7 @@ export function Recent({ onSelectChannel, onPlayChannel }: RecentProps) {
       onToggleFavorite={toggleFavorite}
       onSelect={onSelectChannel}
       onPlay={onPlayChannel}
+      currentChannelId={currentChannelId}
       emptyState={<Text c="dimmed">Nothing played yet.</Text>}
     />
   );
