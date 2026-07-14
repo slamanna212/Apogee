@@ -61,10 +61,19 @@ export function UpdateModal() {
             <Text size="sm" c="dimmed">
               {currentVersion ? `v${currentVersion} → v${latestVersion}` : `Version ${latestVersion} is available`}
             </Text>
-            {changelog && (
-              <Text size="sm" style={{ whiteSpace: 'pre-wrap', maxHeight: 200, overflowY: 'auto' }}>
-                {changelog}
-              </Text>
+            {changelog.length > 0 && (
+              <Stack gap={10} style={{ maxHeight: 200, overflowY: 'auto' }}>
+                {changelog.map((entry) => (
+                  <div key={entry.version}>
+                    <Text size="sm" fw={600}>
+                      v{entry.version}
+                    </Text>
+                    <Text size="sm" c="dimmed" style={{ whiteSpace: 'pre-wrap' }}>
+                      {entry.body?.trim() || 'No release notes provided.'}
+                    </Text>
+                  </div>
+                ))}
+              </Stack>
             )}
             <Group justify="flex-end" mt={8}>
               <Button variant="subtle" onClick={dismiss}>

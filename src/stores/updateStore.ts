@@ -20,8 +20,10 @@ interface GithubReleaseAsset {
 }
 
 interface GithubRelease {
+  tag_name: string;
   draft: boolean;
   prerelease: boolean;
+  body: string | null;
   assets: GithubReleaseAsset[];
 }
 
@@ -34,11 +36,16 @@ interface UpdateMetadata {
   rawJson: Record<string, unknown>;
 }
 
+export interface ChangelogEntry {
+  version: string;
+  body: string | null;
+}
+
 interface UpdateState {
   status: UpdateStatus;
   currentVersion?: string;
   latestVersion?: string;
-  changelog?: string;
+  changelog: ChangelogEntry[];
   progress?: DownloadProgress;
   errorMessage?: string;
   pendingUpdate: Update | null;
@@ -48,11 +55,17 @@ interface UpdateState {
   dismiss: () => void;
 }
 
+// Releases newer than the running version are shown in the changelog; this
+// caps how many in case the running version's release was deleted (or is
+// otherwise never found while walking the list), so an old install can't
+// pull unbounded history.
+const MAX_CHANGELOG_ENTRIES = 10;
+
 // GitHub has no "latest release including prereleases" URL alias, so the
 // channel is resolved here by walking the (newest-first, draft-free for
 // unauthenticated requests) release list ourselves rather than relying on
 // the static endpoint baked into tauri.conf.json.
-async function findLatestJsonUrl(channel: UpdateChannel): Promise<string | null> {
+async function fetchQualifyingReleases(channel: UpdateChannel): Promise<GithubRelease[]> {
   const response = await fetch(`https://api.github.com/repos/${REPO}/releases`, {
     headers: { Accept: 'application/vnd.github+json' },
   });
@@ -60,21 +73,40 @@ async function findLatestJsonUrl(channel: UpdateChannel): Promise<string | null>
     throw new Error(`GitHub API request failed: ${response.status}`);
   }
   const releases = (await response.json()) as GithubRelease[];
-  const release = releases.find((r) => !r.draft && (channel === 'beta' || !r.prerelease));
-  if (!release) return null;
+  return releases.filter((r) => !r.draft && (channel === 'beta' || !r.prerelease));
+}
 
-  const asset = release.assets.find((a) => a.name === 'latest.json');
+function findLatestJsonAsset(releases: GithubRelease[]): string | null {
+  const asset = releases[0]?.assets.find((a) => a.name === 'latest.json');
   return asset?.browser_download_url ?? null;
+}
+
+// `latest.json`'s baked-in notes are frozen at CI draft-creation time, but
+// release notes here are hand-written on GitHub afterward - so the live
+// release list's `body` field (fetched above) is the source of truth, not
+// the updater metadata's `body`. Releases are already newest-first, so this
+// just walks forward collecting entries until it hits the running version.
+function buildChangelog(releases: GithubRelease[], currentVersion: string): ChangelogEntry[] {
+  const entries: ChangelogEntry[] = [];
+  for (const release of releases) {
+    if (entries.length >= MAX_CHANGELOG_ENTRIES) break;
+    const version = release.tag_name.replace(/^v/, '');
+    if (version === currentVersion) break;
+    entries.push({ version, body: release.body });
+  }
+  return entries;
 }
 
 export const useUpdateStore = create<UpdateState>((set, get) => ({
   status: 'idle',
   pendingUpdate: null,
+  changelog: [],
 
   async checkForUpdates(channel) {
     set({ status: 'checking', errorMessage: undefined });
     try {
-      const url = await findLatestJsonUrl(channel);
+      const releases = await fetchQualifyingReleases(channel);
+      const url = findLatestJsonAsset(releases);
       if (!url) {
         set({ status: 'idle' });
         return;
@@ -92,7 +124,7 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
         pendingUpdate: update,
         currentVersion: update.currentVersion,
         latestVersion: update.version,
-        changelog: update.body,
+        changelog: buildChangelog(releases, update.currentVersion),
       });
     } catch (err) {
       set({ status: 'error', errorMessage: err instanceof Error ? err.message : String(err) });
@@ -152,6 +184,6 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
   },
 
   dismiss() {
-    set({ status: 'idle', pendingUpdate: null, errorMessage: undefined, progress: undefined });
+    set({ status: 'idle', pendingUpdate: null, errorMessage: undefined, progress: undefined, changelog: [] });
   },
 }));
