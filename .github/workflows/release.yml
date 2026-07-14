@@ -68,6 +68,8 @@ jobs:
         include:
           - platform: 'ubuntu-22.04'
           - platform: 'windows-latest'
+          - platform: 'macos-latest'
+            args: '--target universal-apple-darwin'
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout code
@@ -87,6 +89,10 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Add macOS Rust targets
+        if: matrix.platform == 'macos-latest'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
@@ -115,7 +121,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
+          args: ${{ matrix.args }}
           tagName: ${{ needs.check-version.outputs.tag }}
           releaseName: 'Release ${{ needs.check-version.outputs.tag }}'
           releaseBody: 'See the assets below to download this version.'
@@ -130,11 +143,17 @@ jobs:
           set -euo pipefail
           TAG="${{ needs.check-version.outputs.tag }}"
           BUNDLE_DIR="src-tauri/target/release/bundle"
+          if [ "${{ matrix.platform }}" = "macos-latest" ]; then
+            BUNDLE_DIR="src-tauri/target/universal-apple-darwin/release/bundle"
+          fi
           if [ "${{ matrix.platform }}" = "ubuntu-22.04" ]; then
             cp "$BUNDLE_DIR"/deb/*.deb Apogee_amd64.deb
             cp "$BUNDLE_DIR"/rpm/*.rpm Apogee-x86_64.rpm
             cp "$BUNDLE_DIR"/appimage/*.AppImage Apogee_amd64.AppImage
             gh release upload "$TAG" Apogee_amd64.deb Apogee-x86_64.rpm Apogee_amd64.AppImage --repo "${{ github.repository }}" --clobber
+          elif [ "${{ matrix.platform }}" = "macos-latest" ]; then
+            cp "$BUNDLE_DIR"/dmg/*.dmg Apogee_universal.dmg
+            gh release upload "$TAG" Apogee_universal.dmg --repo "${{ github.repository }}" --clobber
           else
             cp "$BUNDLE_DIR"/nsis/*.exe Apogee_x64-setup.exe
             gh release upload "$TAG" Apogee_x64-setup.exe --repo "${{ github.repository }}" --clobber

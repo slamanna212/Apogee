@@ -41,6 +41,8 @@ pub fn run() {
       // `std::process::exit`) - see `mpv::create_process_job`. The returned
       // `Job` must be kept alive for the process lifetime, so it's stashed in
       // managed state rather than dropped at the end of this closure.
+      // macOS has no equivalent primitive - see the comment in
+      // `mpv::spawn_mpv` for why that gap is accepted rather than solved.
       #[cfg(windows)]
       if let Some(job) = mpv::create_process_job() {
         app.manage(job);

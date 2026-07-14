@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Intentionally empty. Apogee is NOT sandboxed
+       (com.apple.security.app-sandbox is deliberately omitted): sandboxing
+       would break Homebrew mpv discovery/exec in mpv.rs's resolve_mpv_path()
+       and spawn_mpv(). No keychain-access-group entry is needed either -
+       that entitlement only matters to sandboxed apps; secrets.rs's plain
+       keyring::Entry usage relies on the code signature itself for Keychain
+       ACLs. Hardened runtime is applied via tauri.conf.json's
+       bundle.macOS.hardenedRuntime + a signing identity supplied at build
+       time, independent of this file's contents. -->
+</dict>
+</plist>

@@ -45,6 +45,19 @@ fn resolve_mpv_path(app: &AppHandle) -> String {
             return bundled.to_string_lossy().into_owned();
         }
     }
+
+    // Apps launched from Finder/Dock (as opposed to a Terminal) don't inherit
+    // the interactive shell's PATH, so a bare "mpv" lookup often misses
+    // Homebrew even when it's installed. Check both Homebrew prefixes
+    // explicitly before falling back to plain PATH resolution (which still
+    // covers MacPorts/manual installs on PATH).
+    #[cfg(target_os = "macos")]
+    for candidate in ["/opt/homebrew/bin/mpv", "/usr/local/bin/mpv"] {
+        if std::path::Path::new(candidate).exists() {
+            return candidate.to_string();
+        }
+    }
+
     "mpv".to_string()
 }
 
@@ -190,6 +203,15 @@ fn spawn_mpv(mpv_path: &str) -> std::io::Result<Child> {
     // kind of Apogee exit" case, but Linux has no equivalent - ask the kernel
     // to SIGTERM mpv itself if Apogee's process dies for any reason (crash,
     // force-quit, `kill -9`) so it's not left running/orphaned.
+    //
+    // macOS has no PR_SET_PDEATHSIG or Job Object equivalent, so this
+    // abnormal-exit case (crash/force-quit only - normal quit and the
+    // updater's relaunch are already covered by kill_on_exit/kill_blocking,
+    // which run unconditionally on every platform) is left unhandled there.
+    // Closing it fully would need an external watcher process polling the
+    // parent PID via kqueue/EVFILT_PROC, which is disproportionate to the
+    // risk (a briefly orphaned mpv after an already-abnormal crash, not data
+    // loss) - accepted as a known limitation, not a TODO.
     #[cfg(target_os = "linux")]
     unsafe {
         cmd.pre_exec(|| {
