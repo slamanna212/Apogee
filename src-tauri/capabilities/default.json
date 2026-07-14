@@ -22,6 +22,7 @@
     "store:default",
     "updater:default",
     "process:default",
+    "dialog:default",
     {
       "identifier": "http:default",
       "allow": [

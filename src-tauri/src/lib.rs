@@ -1,3 +1,4 @@
+mod logs;
 mod media_session;
 mod mpv;
 mod secrets;
@@ -12,6 +13,7 @@ pub fn run() {
     .plugin(tauri_plugin_http::init())
     .plugin(tauri_plugin_store::Builder::default().build())
     .plugin(tauri_plugin_process::init())
+    .plugin(tauri_plugin_dialog::init())
     .manage(mpv::MpvState::default())
     .invoke_handler(tauri::generate_handler![
       mpv::mpv_load,
@@ -26,6 +28,7 @@ pub fn run() {
       media_session::media_session_set_playback,
       updater::check_update_at_endpoint,
       updater::download_and_install_update,
+      logs::export_log_file,
     ])
     .setup(|app| {
       app.handle().plugin(

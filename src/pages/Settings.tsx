@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Group, NumberInput, PasswordInput, Select, Slider, Switch, Text, TextInput } from '@mantine/core';
 import { getVersion } from '@tauri-apps/api/app';
+import { invoke } from '@tauri-apps/api/core';
+import { save } from '@tauri-apps/plugin-dialog';
 import { useSettingsStore, type UpdateChannel } from '../stores/settingsStore';
 import { useLibraryStore, type ThemeMode } from '../stores/libraryStore';
 import { useUpdateStore } from '../stores/updateStore';
@@ -54,6 +56,9 @@ export function Settings() {
   const updateStatus = useUpdateStore((s) => s.status);
   const checkForUpdates = useUpdateStore((s) => s.checkForUpdates);
 
+  const [logExportStatus, setLogExportStatus] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle');
+  const [logExportError, setLogExportError] = useState<string | null>(null);
+
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
   }, []);
@@ -62,6 +67,26 @@ export function Settings() {
     setCheckedUpToDate(false);
     await checkForUpdates(settings.updateChannel);
     if (useUpdateStore.getState().status === 'idle') setCheckedUpToDate(true);
+  }
+
+  async function handleDownloadLog() {
+    setLogExportStatus('saving');
+    setLogExportError(null);
+    try {
+      const destination = await save({
+        defaultPath: `apogee-log-${new Date().toISOString().slice(0, 10)}.log`,
+        filters: [{ name: 'Log file', extensions: ['log'] }],
+      });
+      if (!destination) {
+        setLogExportStatus('idle');
+        return;
+      }
+      await invoke('export_log_file', { destination });
+      setLogExportStatus('ok');
+    } catch (err) {
+      setLogExportStatus('error');
+      setLogExportError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   useEffect(() => {
@@ -210,6 +235,24 @@ export function Settings() {
               </Text>
             )}
           </Group>
+        </Card>
+
+        <Card title="Diagnostics">
+          <Group align="center">
+            <Button onClick={handleDownloadLog} loading={logExportStatus === 'saving'}>
+              Download log file
+            </Button>
+            {logExportStatus === 'ok' && (
+              <Text c="teal" size="sm">
+                Saved
+              </Text>
+            )}
+          </Group>
+          {logExportStatus === 'error' && (
+            <Alert color="red" title="Couldn't save log file">
+              {logExportError}
+            </Alert>
+          )}
         </Card>
 
         <Group justify="flex-end">
