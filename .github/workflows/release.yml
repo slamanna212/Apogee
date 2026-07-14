@@ -113,7 +113,7 @@ jobs:
             conf.version = '$VERSION';
             fs.writeFileSync(path, JSON.stringify(conf, null, 2) + '\n');
           "
-          sed -i "0,/^version = /s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+          VERSION="$VERSION" perl -i -pe 'BEGIN{$done=0} if (!$done && s/^version = ".*"/version = "$ENV{VERSION}"/) { $done=1 }' src-tauri/Cargo.toml
 
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
