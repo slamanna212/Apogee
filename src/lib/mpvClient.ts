@@ -7,6 +7,9 @@ export interface MpvPropertyChangeEvent {
   name?: string;
   data?: unknown;
   request_id?: number;
+  // Present on 'end-file' events - mpv's JSON IPC reports one of "eof",
+  // "stop", "quit", "error", "redirect".
+  reason?: string;
 }
 
 // Must match GET_PROPERTY_REQUEST_ID in src-tauri/src/mpv.rs.
@@ -26,6 +29,10 @@ export function setVolume(volume: number): Promise<void> {
 
 export function getProperty(name: string): Promise<void> {
   return invoke('mpv_get_property', { name });
+}
+
+export function getStderrTail(): Promise<string> {
+  return invoke('mpv_get_stderr_tail');
 }
 
 export function onMpvEvent(callback: (event: MpvPropertyChangeEvent) => void): Promise<UnlistenFn> {

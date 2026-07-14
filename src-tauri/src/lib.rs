@@ -18,6 +18,7 @@ pub fn run() {
       mpv::mpv_stop,
       mpv::mpv_set_volume,
       mpv::mpv_get_property,
+      mpv::mpv_get_stderr_tail,
       secrets::secrets_set,
       secrets::secrets_get,
       secrets::secrets_delete,

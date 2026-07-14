@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Xtream base URLs are arbitrary, user-configured at runtime, and many
+       providers serve stream_icon logos over plain http:// - without this,
+       macOS's WKWebView blocks those <img> loads under App Transport
+       Security by default (Linux's WebKitGTK and Windows' WebView2 don't
+       enforce ATS, so this is macOS-only). The Xtream API calls themselves
+       already bypass ATS since they go through @tauri-apps/plugin-http's
+       Rust-side client rather than the webview. -->
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsArbitraryLoads</key>
+    <true/>
+  </dict>
+</dict>
+</plist>

@@ -366,3 +366,11 @@ pub async fn mpv_get_property(state: State<'_, MpvState>, name: String) -> Resul
     )
     .await
 }
+
+/// Exposes mpv's recent stderr output (already tracked in `stderr_tail` for
+/// spawn-failure error messages) so the frontend can attach diagnostic
+/// context when a load stalls or fails after mpv started successfully.
+#[tauri::command]
+pub async fn mpv_get_stderr_tail(state: State<'_, MpvState>) -> Result<String, String> {
+    Ok(stderr_tail_string(&state.stderr_tail).await)
+}
