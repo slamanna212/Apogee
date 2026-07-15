@@ -1,4 +1,5 @@
-import { Alert, Button, Group, Modal, Stack, Text } from '@mantine/core';
+import { Alert, Button, Group, Modal, Stack, Text, Typography } from '@mantine/core';
+import Markdown from 'react-markdown';
 import { useUpdateStore } from '../stores/updateStore';
 
 // Mantine's <Progress> drives its fill width through a CSS custom property
@@ -68,9 +69,15 @@ export function UpdateModal() {
                     <Text size="sm" fw={600}>
                       v{entry.version}
                     </Text>
-                    <Text size="sm" c="dimmed" style={{ whiteSpace: 'pre-wrap' }}>
-                      {entry.body?.trim() || 'No release notes provided.'}
-                    </Text>
+                    {entry.body?.trim() ? (
+                      <Typography fz="sm" c="dimmed">
+                        <Markdown>{entry.body}</Markdown>
+                      </Typography>
+                    ) : (
+                      <Text size="sm" c="dimmed">
+                        No release notes provided.
+                      </Text>
+                    )}
                   </div>
                 ))}
               </Stack>
