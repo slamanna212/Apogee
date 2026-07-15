@@ -6,6 +6,8 @@ use tauri::State;
 /// Apogee's Discord Application (Rich Presence) client ID. Public, not a secret.
 const DISCORD_CLIENT_ID: &str = "1526615639786258593";
 const GITHUB_URL: &str = "https://github.com/slamanna212/Apogee";
+const APP_ICON_URL: &str =
+  "https://raw.githubusercontent.com/slamanna212/Apogee/main/src-tauri/icons/icon.png";
 
 #[derive(Clone, Default)]
 pub struct DiscordRpcState(pub Arc<Mutex<Option<DiscordIpcClient>>>);
@@ -51,6 +53,9 @@ pub async fn discord_rpc_set_activity(
       if let Some(text) = large_text.as_deref().filter(|s| !s.is_empty()) {
         assets = assets.large_text(text);
       }
+      // Badges the app's own logo onto the corner of the large image (the
+      // track/channel art) - only meaningful paired with a large image.
+      assets = assets.small_image(APP_ICON_URL).small_text("Apogee");
     }
 
     let mut activity = Activity::new()
