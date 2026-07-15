@@ -495,6 +495,23 @@ function BarContent({
             {subtitleParts.join(' — ')}
           </div>
         )}
+        {nowPlaying?.title && (
+          <div
+            data-tauri-drag-region
+            style={{
+              font: '600 10px "Sora", sans-serif',
+              color: 'var(--app-dim)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              opacity: 0.7,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {`CH ${nowPlaying.channel_number} · ${currentChannel.name}`}
+          </div>
+        )}
       </div>
       <CutTypeBadge cutType={nowPlaying?.cut_type} />
       <Waveform active={status === 'playing'} />

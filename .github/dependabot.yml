@@ -1,0 +1,67 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    versioning-strategy: increase
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "npm"
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+    groups:
+      mantine:
+        patterns:
+          - "@mantine/*"
+      tauri:
+        patterns:
+          - "@tauri-apps/*"
+      fontsource:
+        patterns:
+          - "@fontsource/*"
+      types:
+        patterns:
+          - "@types/*"
+      postcss:
+        patterns:
+          - "postcss"
+          - "postcss-*"
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+
+  - package-ecosystem: "cargo"
+    directory: "/src-tauri"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    versioning-strategy: increase
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "cargo"
+    groups:
+      tauri:
+        patterns:
+          - "tauri"
+          - "tauri-build"
+          - "tauri-plugin-*"
+      objc2:
+        patterns:
+          - "objc2*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns:
+          - "*"
