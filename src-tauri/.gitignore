@@ -5,3 +5,6 @@
 
 # Fetched at build time by scripts/fetch-mpv.mjs - not committed
 /binaries/
+
+# Local-dev-only StellarTunerLog API key, loaded by build.rs - not committed
+.env

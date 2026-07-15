@@ -140,7 +140,8 @@ function TitlebarButton({ onClick, label, children }: { onClick: () => void; lab
 }
 
 function AppContent() {
-  const { settings, loaded: settingsLoaded, load: loadSettings } = useSettingsStore();
+  const { settings, builtinStellarApiKey, loaded: settingsLoaded, load: loadSettings } = useSettingsStore();
+  const stellarApiKey = builtinStellarApiKey ?? '';
   const {
     channels,
     channelMetadata,
@@ -236,10 +237,10 @@ function AppContent() {
 
   useEffect(() => {
     if (!settingsLoaded || channels.length === 0) return;
-    pollNowPlaying(settings.stellarApiKey);
-    const id = setInterval(() => pollNowPlaying(settings.stellarApiKey), settings.pollIntervalSec * 1000);
+    pollNowPlaying(stellarApiKey);
+    const id = setInterval(() => pollNowPlaying(stellarApiKey), settings.pollIntervalSec * 1000);
     return () => clearInterval(id);
-  }, [settingsLoaded, settings.stellarApiKey, settings.pollIntervalSec, channels, pollNowPlaying]);
+  }, [settingsLoaded, stellarApiKey, settings.pollIntervalSec, channels, pollNowPlaying]);
 
   useEffect(() => {
     if (channels.length > 0) fetchChannelMetadata();
@@ -529,7 +530,7 @@ function AppContent() {
         <ChannelModal
           channel={modalChannel}
           metadata={channelMetadata.get(modalChannel.stream_id)}
-          apiKey={settings.stellarApiKey}
+          apiKey={stellarApiKey}
           isFavorite={favorites.includes(modalChannel.stream_id)}
           onToggleFavorite={() => toggleFavorite(modalChannel.stream_id)}
           onClose={() => setModalStreamId(null)}

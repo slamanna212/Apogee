@@ -16,26 +16,51 @@ interface ChannelModalProps {
 
 const BATCH_SIZE = 10;
 
+/** "Just now" / "12m ago" / "3h ago" - coarse, no need for anything finer while browsing history. */
+function formatPlayedAgo(playedAt: string, now: number): string {
+  const minutes = Math.max(0, Math.floor((now - Date.parse(playedAt)) / 60000));
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ago`;
+}
+
 export function ChannelModal({ channel, metadata, apiKey, isFavorite, onToggleFavorite, onClose }: ChannelModalProps) {
   const [history, setHistory] = useState<StellarHistoryEntry[]>([]);
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
+  const [now, setNow] = useState(() => Date.now());
   const scrollRef = useRef<HTMLDivElement>(null);
   const throttledRef = useRef(false);
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     setHistory([]);
     setVisibleCount(BATCH_SIZE);
     if (!metadata || !apiKey) return;
     let cancelled = false;
-    getHistory(metadata.id, apiKey)
-      .then((plays) => {
-        if (!cancelled) setHistory(plays);
-      })
-      .catch(() => {
-        if (!cancelled) setHistory([]);
-      });
+
+    function fetchHistory() {
+      if (!metadata) return;
+      getHistory(metadata.id, apiKey)
+        .then((plays) => {
+          if (!cancelled) setHistory(plays);
+        })
+        .catch(() => {
+          // transient failure - keep showing the last known history
+        });
+    }
+
+    fetchHistory();
+    // History updates within ~60s of a song change upstream - refetch on the
+    // same cadence so a channel modal left open picks up new plays.
+    const id = setInterval(fetchHistory, 60_000);
     return () => {
       cancelled = true;
+      clearInterval(id);
     };
   }, [metadata, apiKey]);
 
@@ -220,7 +245,16 @@ export function ChannelModal({ channel, metadata, apiKey, isFavorite, onToggleFa
                   padding: 10,
                 }}
               >
-                <div style={{ minWidth: 0 }}>
+                {entry.artwork_url ? (
+                  <img
+                    src={entry.artwork_url}
+                    alt=""
+                    style={{ width: 40, height: 40, borderRadius: 10, objectFit: 'cover', flex: 'none', background: 'var(--app-panel2)' }}
+                  />
+                ) : (
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--app-panel2)', flex: 'none' }} />
+                )}
+                <div style={{ minWidth: 0, flex: 1 }}>
                   <Text size="sm" fw={600} truncate>
                     {entry.title}
                   </Text>
@@ -228,6 +262,19 @@ export function ChannelModal({ channel, metadata, apiKey, isFavorite, onToggleFa
                     {[entry.artist, entry.album].filter(Boolean).join(' — ')}
                   </Text>
                 </div>
+                <span
+                  style={{
+                    flex: 'none',
+                    font: '600 10px "Space Grotesk", sans-serif',
+                    color: 'var(--app-dim)',
+                    background: 'var(--app-panel2)',
+                    borderRadius: 999,
+                    padding: '4px 10px',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {formatPlayedAgo(entry.played_at, now)}
+                </span>
               </div>
             ))}
             {history.length === 0 && (

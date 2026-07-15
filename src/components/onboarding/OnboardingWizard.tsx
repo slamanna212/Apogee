@@ -3,15 +3,14 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import type { Settings } from '../../stores/settingsStore';
 import { WelcomeScreen } from './WelcomeScreen';
 import { XtreamSetupScreen } from './XtreamSetupScreen';
-import { StellarApiScreen } from './StellarApiScreen';
 import { ControlsGuideScreen } from './ControlsGuideScreen';
 
-type OnboardingStep = 0 | 1 | 2 | 3;
+type OnboardingStep = 0 | 1 | 2;
 
-const STEP_LABELS = ['Welcome', 'Xtream connection', 'StellarTunerLog', 'Get around'];
+const STEP_LABELS = ['Welcome', 'Xtream connection', 'Get around'];
 
 function clampStep(step: number): OnboardingStep {
-  if (step < 0 || step > 3 || Number.isNaN(step)) return 0;
+  if (step < 0 || step > 2 || Number.isNaN(step)) return 0;
   return step as OnboardingStep;
 }
 
@@ -56,7 +55,7 @@ export function OnboardingWizard() {
   }
 
   function finish(patch: Partial<Settings>) {
-    void updateSettings({ ...patch, onboardingComplete: true, onboardingStep: 3 });
+    void updateSettings({ ...patch, onboardingComplete: true, onboardingStep: 2 });
   }
 
   return (
@@ -83,15 +82,7 @@ export function OnboardingWizard() {
         {step === 1 && (
           <XtreamSetupScreen settings={settings} onBack={back} onNext={(patch) => advance(patch, 2)} />
         )}
-        {step === 2 && (
-          <StellarApiScreen
-            settings={settings}
-            onBack={back}
-            onSkip={(patch) => advance(patch, 3)}
-            onNext={(patch) => advance(patch, 3)}
-          />
-        )}
-        {step === 3 && <ControlsGuideScreen onBack={back} onFinish={() => finish({})} />}
+        {step === 2 && <ControlsGuideScreen onBack={back} onFinish={() => finish({})} />}
       </div>
     </div>
   );

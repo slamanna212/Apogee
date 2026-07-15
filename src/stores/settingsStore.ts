@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { load, type Store } from '@tauri-apps/plugin-store';
-import { getSecret, setSecret, SECRET_KEYS } from '../lib/secrets';
+import { getSecret, setSecret, getBuiltinStellarApiKey, SECRET_KEYS } from '../lib/secrets';
 
 export type UpdateChannel = 'stable' | 'beta';
 
@@ -11,7 +11,6 @@ export interface Settings {
   streamExtension: string;
   categoryId: string | null;
   categoryName: string | null;
-  stellarApiKey: string;
   pollIntervalSec: number;
   defaultVolume: number;
   updateChannel: UpdateChannel;
@@ -29,7 +28,6 @@ export const DEFAULT_SETTINGS: Settings = {
   streamExtension: '.ts',
   categoryId: null,
   categoryName: null,
-  stellarApiKey: '',
   pollIntervalSec: 10,
   defaultVolume: 70,
   updateChannel: 'stable',
@@ -40,10 +38,12 @@ export const DEFAULT_SETTINGS: Settings = {
   discordRpcEnabled: false,
 };
 
-type PersistedSettings = Omit<Settings, 'password' | 'stellarApiKey'>;
+type PersistedSettings = Omit<Settings, 'password'>;
 
 interface SettingsState {
   settings: Settings;
+  /** Baked in at build time from the shared StellarTunerLog API key - see secrets.rs. */
+  builtinStellarApiKey: string | null;
   loaded: boolean;
   load: () => Promise<void>;
   update: (patch: Partial<Settings>) => Promise<void>;
@@ -59,32 +59,27 @@ function getStore() {
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   settings: DEFAULT_SETTINGS,
+  builtinStellarApiKey: null,
   loaded: false,
   async load() {
     const store = await getStore();
     const stored = (await store.get<Record<string, unknown>>('settings')) ?? {};
 
-    // Migrate any plaintext secrets left over from before keyring storage was added.
+    // Migrate any plaintext password left over from before keyring storage was added.
     const legacyPassword = typeof stored.password === 'string' ? stored.password : undefined;
-    const legacyStellarApiKey =
-      typeof stored.stellarApiKey === 'string' ? stored.stellarApiKey : undefined;
 
-    let [password, stellarApiKey] = await Promise.all([
+    let [password, builtinStellarApiKey] = await Promise.all([
       getSecret(SECRET_KEYS.xtreamPassword),
-      getSecret(SECRET_KEYS.stellarApiKey),
+      getBuiltinStellarApiKey(),
     ]);
 
     if (!password && legacyPassword) {
       await setSecret(SECRET_KEYS.xtreamPassword, legacyPassword);
       password = legacyPassword;
     }
-    if (!stellarApiKey && legacyStellarApiKey) {
-      await setSecret(SECRET_KEYS.stellarApiKey, legacyStellarApiKey);
-      stellarApiKey = legacyStellarApiKey;
-    }
 
-    if (legacyPassword !== undefined || legacyStellarApiKey !== undefined) {
-      const { password: _password, stellarApiKey: _stellarApiKey, ...rest } = stored;
+    if (legacyPassword !== undefined) {
+      const { password: _password, ...rest } = stored;
       await store.set('settings', rest);
       await store.save();
     }
@@ -99,9 +94,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         ...DEFAULT_SETTINGS,
         ...(stored as Partial<PersistedSettings>),
         password: password ?? '',
-        stellarApiKey: stellarApiKey ?? '',
         onboardingComplete: isPreOnboardingInstall || Boolean(stored.onboardingComplete),
       },
+      builtinStellarApiKey,
       loaded: true,
     });
   },
@@ -109,16 +104,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const next = { ...get().settings, ...patch };
     set({ settings: next });
 
-    const { password, stellarApiKey, ...persisted } = next;
+    const { password, ...persisted } = next;
     const store = await getStore();
     await store.set('settings', persisted);
     await store.save();
 
     if (patch.password !== undefined) {
       await setSecret(SECRET_KEYS.xtreamPassword, password);
-    }
-    if (patch.stellarApiKey !== undefined) {
-      await setSecret(SECRET_KEYS.stellarApiKey, stellarApiKey);
     }
   },
 }));

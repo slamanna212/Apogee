@@ -43,7 +43,6 @@ export function Settings() {
   const [username, setUsername] = useState(settings.username);
   const [password, setPassword] = useState(settings.password);
   const [streamExtension, setStreamExtension] = useState(settings.streamExtension);
-  const [stellarApiKey, setStellarApiKey] = useState(settings.stellarApiKey);
   const [pollIntervalSec, setPollIntervalSec] = useState(settings.pollIntervalSec);
   const [defaultVolume, setDefaultVolume] = useState(settings.defaultVolume);
   const [categories, setCategories] = useState<XtreamCategory[]>([]);
@@ -95,7 +94,6 @@ export function Settings() {
     setUsername(settings.username);
     setPassword(settings.password);
     setStreamExtension(settings.streamExtension);
-    setStellarApiKey(settings.stellarApiKey);
     setPollIntervalSec(settings.pollIntervalSec);
     setDefaultVolume(settings.defaultVolume);
     setCategoryId(settings.categoryId);
@@ -122,7 +120,6 @@ export function Settings() {
       username,
       password,
       streamExtension,
-      stellarApiKey,
       pollIntervalSec,
       defaultVolume,
       categoryId,
@@ -188,12 +185,8 @@ export function Settings() {
             </Text>
             <Slider value={defaultVolume} onChange={setDefaultVolume} min={0} max={100} label={(v) => `${v}%`} />
           </div>
-        </Card>
-
-        <Card title="StellarTunerLog API">
-          <TextInput label="API key" value={stellarApiKey} onChange={(e) => setStellarApiKey(e.currentTarget.value)} />
           <NumberInput
-            label="Poll interval (seconds)"
+            label="Now-playing poll interval (seconds)"
             min={5}
             max={300}
             value={pollIntervalSec}

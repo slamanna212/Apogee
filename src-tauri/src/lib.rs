@@ -26,6 +26,7 @@ pub fn run() {
       secrets::secrets_set,
       secrets::secrets_get,
       secrets::secrets_delete,
+      secrets::secrets_get_builtin_stellar_key,
       media_session::media_session_set_metadata,
       media_session::media_session_set_playback,
       discord_rpc::discord_rpc_connect,

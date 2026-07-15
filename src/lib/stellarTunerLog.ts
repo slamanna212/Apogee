@@ -50,8 +50,9 @@ export async function getChannels(): Promise<StellarChannel[]> {
 }
 
 /**
- * Returns the whole 7-day history window in one call - the API ignores
- * limit/page params, so pagination is handled client-side by callers.
+ * Returns the last 24 hours of play history in one call - the endpoint takes
+ * no limit/page params at all, so any pagination is handled client-side by
+ * callers.
  */
 export async function getHistory(channelId: string, apiKey: string): Promise<StellarHistoryEntry[]> {
   const res = await fetch(historyUrl(channelId), {

@@ -27,3 +27,11 @@ pub fn secrets_delete(key: String) -> Result<(), String> {
     Err(e) => Err(e.to_string()),
   }
 }
+
+/// Baked in at compile time by build.rs from the STELLAR_API_KEY env var
+/// (the repo's Actions secret in CI, or a git-ignored src-tauri/.env locally).
+/// Resolves to None when no key was available at build time.
+#[tauri::command]
+pub fn secrets_get_builtin_stellar_key() -> Option<String> {
+  option_env!("STELLAR_API_KEY").map(str::to_string)
+}
