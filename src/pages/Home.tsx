@@ -6,13 +6,14 @@ import { usePlayerStore } from '../stores/playerStore';
 import { ChannelCard, CHANNEL_CARD_MIN_WIDTH, CHANNEL_CARD_GAP } from '../components/ChannelCard';
 import { buildRecommendationRows, getAllGenres, rankPersonalizedGenres, shuffleGenres } from '../lib/recommendations';
 import type { XtreamChannel } from '../types/xtream';
-import type { StellarChannel } from '../types/stellarTunerLog';
+import type { StellarChannel, StellarStation } from '../types/stellarTunerLog';
 
 interface RowProps {
   title: string;
   subtitle?: string;
   channels: XtreamChannel[];
   channelMetadata: Map<number, StellarChannel>;
+  nowPlaying: Map<number, StellarStation>;
   favorites: number[];
   currentChannelId?: number;
   onToggleFavorite: (streamId: number) => void;
@@ -20,7 +21,7 @@ interface RowProps {
   onPlay: (streamId: number) => void;
 }
 
-function Row({ title, subtitle, channels, channelMetadata, favorites, currentChannelId, onToggleFavorite, onSelect, onPlay }: RowProps) {
+function Row({ title, subtitle, channels, channelMetadata, nowPlaying, favorites, currentChannelId, onToggleFavorite, onSelect, onPlay }: RowProps) {
   if (channels.length === 0) return null;
   return (
     <div style={{ marginBottom: 30 }}>
@@ -34,6 +35,7 @@ function Row({ title, subtitle, channels, channelMetadata, favorites, currentCha
             <ChannelCard
               channel={channel}
               metadata={channelMetadata.get(channel.stream_id)}
+              nowPlaying={nowPlaying.get(channel.stream_id)}
               isFavorite={favorites.includes(channel.stream_id)}
               isPlaying={channel.stream_id === currentChannelId}
               onToggleFavorite={() => onToggleFavorite(channel.stream_id)}
@@ -55,6 +57,7 @@ interface HomeProps {
 export function Home({ onSelectChannel, onPlayChannel }: HomeProps) {
   const channels = useChannelStore((s) => s.channels);
   const channelMetadata = useChannelStore((s) => s.channelMetadata);
+  const nowPlaying = useChannelStore((s) => s.nowPlaying);
   const favorites = useLibraryStore((s) => s.favorites);
   const recentlyPlayed = useLibraryStore((s) => s.recentlyPlayed);
   const toggleFavorite = useLibraryStore((s) => s.toggleFavorite);
@@ -93,6 +96,7 @@ export function Home({ onSelectChannel, onPlayChannel }: HomeProps) {
         title="Recently played"
         channels={recentChannels.slice(0, 10)}
         channelMetadata={channelMetadata}
+        nowPlaying={nowPlaying}
         favorites={favorites}
         currentChannelId={currentChannelId}
         onToggleFavorite={toggleFavorite}
@@ -106,6 +110,7 @@ export function Home({ onSelectChannel, onPlayChannel }: HomeProps) {
           subtitle={row.personalized ? `because you've been playing ${row.genre}` : 'something new to try'}
           channels={row.channels}
           channelMetadata={channelMetadata}
+          nowPlaying={nowPlaying}
           favorites={favorites}
           currentChannelId={currentChannelId}
           onToggleFavorite={toggleFavorite}

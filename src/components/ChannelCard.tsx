@@ -44,6 +44,8 @@ export function ChannelCard({ channel, metadata, isFavorite, isPlaying, onToggle
   const number = metadata?.channel_number ?? channel.num;
   const logoUrl = metadata?.logos?.color_dark_square?.url || channel.stream_icon;
   const background = metadata?.dark_bg_color || hashGradient(channel.name);
+  const trackTitle = nowPlaying?.title || name;
+  const trackArtist = nowPlaying?.artist;
 
   return (
     <div
@@ -226,20 +228,36 @@ export function ChannelCard({ channel, metadata, isFavorite, isPlaying, onToggle
       </div>
     </div>
     </div>
-    <div
-      style={{
-        marginTop: 12,
-        padding: '0 4px',
-        textAlign: 'center',
-        font: '600 15px "Space Grotesk", sans-serif',
-        color: isPlaying ? 'var(--app-accent)' : 'var(--app-text)',
-        lineHeight: 1.3,
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {name}
+    <div style={{ marginTop: 12, padding: '0 4px' }}>
+      <div
+        style={{
+          textAlign: 'center',
+          font: '600 15px "Space Grotesk", sans-serif',
+          color: isPlaying ? 'var(--app-accent)' : 'var(--app-text)',
+          lineHeight: 1.3,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {trackTitle}
+      </div>
+      {trackArtist && (
+        <div
+          style={{
+            marginTop: 2,
+            textAlign: 'center',
+            font: '400 13px "Sora", sans-serif',
+            color: 'var(--app-dim)',
+            lineHeight: 1.3,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {trackArtist}
+        </div>
+      )}
     </div>
     </div>
   );
