@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActionIcon, Button, Text } from '@mantine/core';
+import { ActionIcon, Button, Group, Modal, Text } from '@mantine/core';
 import { IconMicrophone2, IconMusic, IconTrash } from '@tabler/icons-react';
 import { useAlertsStore } from '../stores/alertsStore';
 import { useChannelStore } from '../stores/channelStore';
@@ -140,6 +140,28 @@ function FollowCard({ entry, onUnfollow }: { entry: AlertEntry; onUnfollow: () =
   );
 }
 
+function UnfollowConfirmModal({ entry, onConfirm, onCancel }: { entry: AlertEntry; onConfirm: () => void; onCancel: () => void }) {
+  const label = entry.type === 'artist' ? entry.artist : `${entry.title} — ${entry.artist}`;
+  return (
+    <Modal opened onClose={onCancel} withCloseButton={false} size="380px" radius={20} centered portalProps={{ target: '#apogee-window' }}>
+      <Text fw={700} size="lg" mb={8} style={{ fontFamily: '"Space Grotesk", sans-serif' }}>
+        Stop following {entry.type}?
+      </Text>
+      <Text size="sm" c="dimmed" mb={20}>
+        You'll stop getting alerts for "{label}".
+      </Text>
+      <Group justify="flex-end">
+        <Button variant="subtle" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button color="red" onClick={onConfirm}>
+          Unfollow
+        </Button>
+      </Group>
+    </Modal>
+  );
+}
+
 interface CurrentMatch {
   channel: XtreamChannel;
   station: StellarStation;
@@ -160,6 +182,7 @@ export function Alerts({ onPlayChannel }: AlertsProps) {
 
   const [followTab, setFollowTab] = useState<'tracks' | 'artists'>('tracks');
   const initializedTabRef = useRef(false);
+  const [pendingUnfollow, setPendingUnfollow] = useState<AlertEntry | null>(null);
 
   const currentMatches = useMemo(() => {
     const matches: CurrentMatch[] = [];
@@ -246,13 +269,26 @@ export function Alerts({ onPlayChannel }: AlertsProps) {
                 {activeEntries.length === 0 ? (
                   <Text c="dimmed">{followTab === 'tracks' ? 'No tracks followed yet.' : 'No artists followed yet.'}</Text>
                 ) : (
-                  activeEntries.map((entry) => <FollowCard key={entry.id} entry={entry} onUnfollow={() => unfollow(entry.id)} />)
+                  activeEntries.map((entry) => (
+                    <FollowCard key={entry.id} entry={entry} onUnfollow={() => setPendingUnfollow(entry)} />
+                  ))
                 )}
               </div>
             </>
           )}
         </Card>
       </div>
+
+      {pendingUnfollow && (
+        <UnfollowConfirmModal
+          entry={pendingUnfollow}
+          onCancel={() => setPendingUnfollow(null)}
+          onConfirm={() => {
+            unfollow(pendingUnfollow.id);
+            setPendingUnfollow(null);
+          }}
+        />
+      )}
     </div>
   );
 }
