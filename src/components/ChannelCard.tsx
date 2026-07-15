@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { IconInfoSmall, IconPlayerPlayFilled, IconStar, IconStarFilled } from '@tabler/icons-react';
+import { IconInfoSmall, IconPlayerPlayFilled } from '@tabler/icons-react';
 import type { XtreamChannel } from '../types/xtream';
-import type { StellarChannel } from '../types/stellarTunerLog';
+import type { StellarChannel, StellarStation } from '../types/stellarTunerLog';
+import { ChannelActionsMenu } from './ChannelActionsMenu';
 
 export const CHANNEL_CARD_MIN_WIDTH = 180;
 export const CHANNEL_CARD_GAP = 22;
@@ -32,9 +33,10 @@ interface ChannelCardProps {
   onToggleFavorite: () => void;
   onClick: () => void;
   onInfo: () => void;
+  nowPlaying?: StellarStation;
 }
 
-export function ChannelCard({ channel, metadata, isFavorite, isPlaying, onToggleFavorite, onClick, onInfo }: ChannelCardProps) {
+export function ChannelCard({ channel, metadata, isFavorite, isPlaying, onToggleFavorite, onClick, onInfo, nowPlaying }: ChannelCardProps) {
   const [hovered, setHovered] = useState(false);
   const [actionHovered, setActionHovered] = useState(false);
   const showPlayButton = hovered && !actionHovered;
@@ -104,16 +106,13 @@ export function ChannelCard({ channel, metadata, isFavorite, isPlaying, onToggle
           transform: 'translateZ(0)',
         }}
       />
-      <div
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggleFavorite();
-        }}
+      <ChannelActionsMenu
+        nowPlaying={nowPlaying}
+        isFavorite={isFavorite}
+        onToggleFavorite={onToggleFavorite}
         onMouseEnter={() => setActionHovered(true)}
         onMouseLeave={() => setActionHovered(false)}
-        role="button"
-        aria-label={isFavorite ? 'Remove favorite' : 'Add favorite'}
-        style={{
+        triggerStyle={{
           position: 'absolute',
           top: 10,
           right: 10,
@@ -125,14 +124,12 @@ export function ChannelCard({ channel, metadata, isFavorite, isPlaying, onToggle
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: '#fff',
+          color: isFavorite ? 'var(--app-accent)' : '#fff',
           opacity: isFavorite || hovered ? 1 : 0,
           transition: 'opacity 150ms',
           zIndex: 1,
         }}
-      >
-        {isFavorite ? <IconStarFilled size={16} /> : <IconStar size={16} />}
-      </div>
+      />
       <span
         style={{
           position: 'absolute',

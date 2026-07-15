@@ -23,6 +23,7 @@
     "updater:default",
     "process:default",
     "dialog:default",
+    "notification:default",
     "log:default",
     {
       "identifier": "http:default",

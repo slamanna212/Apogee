@@ -151,6 +151,7 @@ export function ChannelGrid({
                     onToggleFavorite={() => onToggleFavorite(channel.stream_id)}
                     onClick={() => onPlay(channel.stream_id)}
                     onInfo={() => onSelect(channel.stream_id)}
+                    nowPlaying={nowPlaying?.get(channel.stream_id)}
                   />
                 ))}
               </div>

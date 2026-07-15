@@ -6,6 +6,7 @@ import { save } from '@tauri-apps/plugin-dialog';
 import { useSettingsStore, type UpdateChannel } from '../stores/settingsStore';
 import { useLibraryStore, type ThemeMode } from '../stores/libraryStore';
 import { useUpdateStore } from '../stores/updateStore';
+import { useAlertsStore } from '../stores/alertsStore';
 import { getLiveCategories } from '../lib/xtream';
 import type { XtreamCategory } from '../types/xtream';
 import logoUrl from '../assets/logo.svg';
@@ -38,6 +39,10 @@ export function Settings() {
   const updateSettings = useSettingsStore((s) => s.update);
   const themeMode = useLibraryStore((s) => s.themeMode);
   const setThemeMode = useLibraryStore((s) => s.setThemeMode);
+  const notifyOS = useAlertsStore((s) => s.notifyOS);
+  const notifyInApp = useAlertsStore((s) => s.notifyInApp);
+  const setNotifyOS = useAlertsStore((s) => s.setNotifyOS);
+  const setNotifyInApp = useAlertsStore((s) => s.setNotifyInApp);
 
   const [baseUrl, setBaseUrl] = useState(settings.baseUrl);
   const [username, setUsername] = useState(settings.username);
@@ -216,6 +221,21 @@ export function Settings() {
             description="Displays the current channel and track (when matched) as your Discord status via Rich Presence"
             checked={settings.discordRpcEnabled}
             onChange={(e) => updateSettings({ discordRpcEnabled: e.currentTarget.checked })}
+          />
+        </Card>
+
+        <Card title="Alerts">
+          <Switch
+            label="In-app notifications"
+            description="Show a toast inside Apogee when a followed track or artist starts playing"
+            checked={notifyInApp}
+            onChange={(e) => setNotifyInApp(e.currentTarget.checked)}
+          />
+          <Switch
+            label="OS notifications"
+            description="Show a system notification, even when Apogee is minimized or in the mini player"
+            checked={notifyOS}
+            onChange={(e) => setNotifyOS(e.currentTarget.checked)}
           />
         </Card>
 

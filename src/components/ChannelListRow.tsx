@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Text, useComputedColorScheme } from '@mantine/core';
-import { IconInfoCircle, IconPlayerPlayFilled, IconStar, IconStarFilled } from '@tabler/icons-react';
+import { IconInfoCircle, IconPlayerPlayFilled } from '@tabler/icons-react';
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel, StellarStation } from '../types/stellarTunerLog';
 import { CutTypeBadge } from './CutTypeBadge';
+import { ChannelActionsMenu } from './ChannelActionsMenu';
 import { pickChannelLogoUrl } from '../lib/channelLogo';
 
 interface ChannelListRowProps {
@@ -142,16 +143,13 @@ export function ChannelListRow({
         <CutTypeBadge cutType={nowPlaying?.cut_type} />
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 'none' }}>
-        <div
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleFavorite();
-          }}
+        <ChannelActionsMenu
+          nowPlaying={nowPlaying}
+          isFavorite={isFavorite}
+          onToggleFavorite={onToggleFavorite}
           onMouseEnter={() => setActionHovered(true)}
           onMouseLeave={() => setActionHovered(false)}
-          role="button"
-          aria-label={isFavorite ? 'Remove favorite' : 'Add favorite'}
-          style={{
+          triggerStyle={{
             width: 32,
             height: 32,
             borderRadius: '50%',
@@ -160,9 +158,7 @@ export function ChannelListRow({
             justifyContent: 'center',
             color: isFavorite ? 'var(--app-accent)' : 'var(--app-dim)',
           }}
-        >
-          {isFavorite ? <IconStarFilled size={16} /> : <IconStar size={16} />}
-        </div>
+        />
         <div
           onClick={(e) => {
             e.stopPropagation();

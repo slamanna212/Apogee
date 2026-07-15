@@ -1,10 +1,11 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type CSSProperties } from 'react';
 import { Modal, Popover, Text } from '@mantine/core';
 import { IconVolume, IconVolume2 } from '@tabler/icons-react';
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarStation } from '../types/stellarTunerLog';
 import type { PlayerStatus } from '../types/player';
 import { CutTypeBadge } from './CutTypeBadge';
+import { ChannelActionsMenu } from './ChannelActionsMenu';
 import { Waveform } from './Waveform';
 
 export type BarMode = 'expanded' | 'collapsed';
@@ -16,6 +17,8 @@ interface TransportBarProps {
   nowPlaying?: StellarStation;
   errorMessage?: string | null;
   volume: number;
+  isFavorite?: boolean;
+  onToggleFavorite?: () => void;
   onPlus: () => void;
   onMinus: () => void;
   onPlayStop: () => void;
@@ -335,6 +338,20 @@ function VolumeControl({
   );
 }
 
+const dotsButtonStyle: CSSProperties = {
+  width: 42,
+  height: 42,
+  borderRadius: '50%',
+  background: 'var(--app-panel2)',
+  border: '1px solid var(--app-border)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flex: 'none',
+  cursor: 'pointer',
+  color: 'var(--app-text)',
+};
+
 function BarContent({
   status,
   currentChannel,
@@ -546,6 +563,8 @@ export function TransportBar({
   nowPlaying,
   errorMessage,
   volume,
+  isFavorite,
+  onToggleFavorite,
   onPlus,
   onMinus,
   onPlayStop,
@@ -639,6 +658,15 @@ export function TransportBar({
           onArtworkClick={isMiniPlayer ? undefined : setExpandedArtwork}
         />
         <VolumeControl volume={volume} onChange={onVolumeChange} compact={compactVolumePopover} />
+        {currentChannel && (
+          <ChannelActionsMenu
+            nowPlaying={nowPlaying}
+            isFavorite={!!isFavorite}
+            onToggleFavorite={onToggleFavorite ?? (() => {})}
+            triggerStyle={{ ...dotsButtonStyle, color: isFavorite ? 'var(--app-accent)' : 'var(--app-text)' }}
+            position="top-end"
+          />
+        )}
       </div>
     </>
   );

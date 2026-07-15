@@ -1,18 +1,22 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { MantineProvider } from '@mantine/core';
+import { Notifications } from '@mantine/notifications';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { currentMonitor, primaryMonitor } from '@tauri-apps/api/window';
 import { PhysicalPosition, PhysicalSize } from '@tauri-apps/api/dpi';
-import { IconApps, IconHistory, IconHome2, IconMinus, IconSettings, IconSquare, IconStar, IconX } from '@tabler/icons-react';
+import { IconApps, IconBell, IconHistory, IconHome2, IconMinus, IconSettings, IconSquare, IconStar, IconX } from '@tabler/icons-react';
 import { error as logError } from '@tauri-apps/plugin-log';
+import { onAction, registerActionTypes } from '@tauri-apps/plugin-notification';
 import logoUrl from './assets/logo.svg';
+import { ALERT_ACTION_TYPE_ID, ALERT_GO_TO_ACTION_ID } from './lib/alertNotify';
 import { theme, cssVariablesResolver } from './theme';
 import { useSettingsStore } from './stores/settingsStore';
 import { useChannelStore } from './stores/channelStore';
 import { usePlayerStore } from './stores/playerStore';
 import { useLibraryStore } from './stores/libraryStore';
 import { useUpdateStore } from './stores/updateStore';
+import { useAlertsStore } from './stores/alertsStore';
 import { setMediaMetadata } from './lib/mediaSession';
 import {
   discordRpcConnect,
@@ -28,15 +32,17 @@ import { Home } from './pages/Home';
 import { Channels } from './pages/Channels';
 import { Recent } from './pages/Recent';
 import { Favorites } from './pages/Favorites';
+import { Alerts } from './pages/Alerts';
 import { Settings } from './pages/Settings';
 
-type Page = 'home' | 'channels' | 'recent' | 'favorites' | 'settings';
+type Page = 'home' | 'channels' | 'recent' | 'favorites' | 'alerts' | 'settings';
 
 const NAV_ITEMS: { page: Page; label: string; icon: typeof IconHome2 }[] = [
   { page: 'home', label: 'Home', icon: IconHome2 },
   { page: 'channels', label: 'Channels', icon: IconApps },
   { page: 'recent', label: 'Recent', icon: IconHistory },
   { page: 'favorites', label: 'Favorites', icon: IconStar },
+  { page: 'alerts', label: 'Alerts', icon: IconBell },
 ];
 
 const COMPACT_BREAKPOINT = 900;
@@ -190,7 +196,25 @@ function AppContent() {
   useEffect(() => {
     loadSettings();
     loadLibrary();
+    void useAlertsStore.getState().load();
     initEventListener();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    void registerActionTypes([
+      { id: ALERT_ACTION_TYPE_ID, actions: [{ id: ALERT_GO_TO_ACTION_ID, title: 'Tune' }] },
+    ]).catch(() => {});
+
+    let unregister: (() => void) | undefined;
+    onAction((notification) => {
+      const streamId = notification.extra?.streamId;
+      if (typeof streamId === 'number') void handlePlayChannel(streamId);
+    }).then((listener) => {
+      unregister = () => void listener.unregister();
+    });
+
+    return () => unregister?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -245,6 +269,11 @@ function AppContent() {
   useEffect(() => {
     if (channels.length > 0) fetchChannelMetadata();
   }, [channels, fetchChannelMetadata]);
+
+  useEffect(() => {
+    useAlertsStore.getState().scan(nowPlaying, handlePlayChannel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nowPlaying]);
 
   const currentNowPlaying = currentChannel ? nowPlaying.get(currentChannel.stream_id) : undefined;
 
@@ -496,6 +525,7 @@ function AppContent() {
                   {page === 'channels' && <Channels onSelectChannel={handleOpenChannel} onPlayChannel={handlePlayChannel} />}
                   {page === 'recent' && <Recent onSelectChannel={handleOpenChannel} onPlayChannel={handlePlayChannel} />}
                   {page === 'favorites' && <Favorites onSelectChannel={handleOpenChannel} onPlayChannel={handlePlayChannel} />}
+                  {page === 'alerts' && <Alerts onPlayChannel={handlePlayChannel} />}
                   {page === 'settings' && <Settings />}
                 </div>
               </>
@@ -512,6 +542,8 @@ function AppContent() {
             currentChannel={currentChannel}
             nowPlaying={currentNowPlaying}
             volume={volume}
+            isFavorite={currentChannel ? favorites.includes(currentChannel.stream_id) : false}
+            onToggleFavorite={() => currentChannel && toggleFavorite(currentChannel.stream_id)}
             onPlus={handlePlus}
             onMinus={handleMinus}
             errorMessage={errorMessage}
@@ -568,6 +600,7 @@ function App() {
 
   return (
     <MantineProvider theme={theme} cssVariablesResolver={cssVariablesResolver} forceColorScheme={resolvedScheme}>
+      <Notifications position="top-right" />
       <AppContent />
     </MantineProvider>
   );
