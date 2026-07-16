@@ -4,6 +4,7 @@ import { IconBrandFacebook, IconBrandTwitter, IconMail, IconPhone, IconStar, Ico
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel, StellarHistoryEntry } from '../types/stellarTunerLog';
 import { getHistory } from '../lib/stellarTunerLog';
+import { ChannelArtwork } from './ChannelArtwork';
 
 interface ChannelModalProps {
   channel: XtreamChannel;
@@ -245,15 +246,14 @@ export function ChannelModal({ channel, metadata, apiKey, isFavorite, onToggleFa
                   padding: 10,
                 }}
               >
-                {entry.artwork_url ? (
-                  <img
-                    src={entry.artwork_url}
-                    alt=""
-                    style={{ width: 40, height: 40, borderRadius: 10, objectFit: 'cover', flex: 'none', background: 'var(--app-panel2)' }}
-                  />
-                ) : (
-                  <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--app-panel2)', flex: 'none' }} />
-                )}
+                <ChannelArtwork
+                  channelName={channel.name}
+                  streamIcon={channel.stream_icon}
+                  metadata={metadata}
+                  artworkUrl={entry.artwork_url}
+                  size={40}
+                  radius={10}
+                />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <Text size="sm" fw={600} truncate>
                     {entry.title}

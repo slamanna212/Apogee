@@ -27,6 +27,14 @@ export function setVolume(volume: number): Promise<void> {
   return invoke('mpv_set_volume', { volume });
 }
 
+export function setProperty(name: string, value: unknown): Promise<void> {
+  return invoke('mpv_set_property', { name, value });
+}
+
+export function setMute(muted: boolean): Promise<void> {
+  return setProperty('mute', muted);
+}
+
 export function getProperty(name: string): Promise<void> {
   return invoke('mpv_get_property', { name });
 }

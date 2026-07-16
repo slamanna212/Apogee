@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { MantineProvider } from '@mantine/core';
 import { Notifications, notifications } from '@mantine/notifications';
 import { invoke } from '@tauri-apps/api/core';
@@ -11,12 +11,13 @@ import { error as logError, warn as logWarn } from '@tauri-apps/plugin-log';
 import logoUrl from './assets/logo.svg';
 import { theme, cssVariablesResolver } from './theme';
 import { useSettingsStore } from './stores/settingsStore';
-import { useChannelStore } from './stores/channelStore';
+import { nextPollDelayMs, useChannelStore } from './stores/channelStore';
 import { usePlayerStore } from './stores/playerStore';
 import { useLibraryStore } from './stores/libraryStore';
 import { useUpdateStore } from './stores/updateStore';
 import { useAlertsStore } from './stores/alertsStore';
 import { useScrobblingStore } from './stores/scrobblingStore';
+import { useSleepTimerStore } from './stores/sleepTimerStore';
 import { setMediaMetadata } from './lib/mediaSession';
 import {
   discordRpcConnect,
@@ -28,15 +29,21 @@ import {
 import { TransportBar, type BarMode } from './components/TransportBar';
 import { ChannelModal } from './components/ChannelModal';
 import { UpdateModal } from './components/UpdateModal';
-import { OnboardingWizard } from './components/onboarding/OnboardingWizard';
 import { Home } from './pages/Home';
 import { Channels } from './pages/Channels';
 import { Recent } from './pages/Recent';
 import { Favorites } from './pages/Favorites';
-import { Alerts } from './pages/Alerts';
-import { Settings } from './pages/Settings';
+
 import { asLastFmError, scrobbleLastFm, updateLastFmNowPlaying } from './lib/lastfm';
 import { ScrobbleCoordinator, type ScrobbleProviderClient } from './lib/scrobbling';
+
+// Not needed on first paint (onboarding only runs once; Alerts/Settings are
+// secondary pages), so keep them out of the main bundle.
+const OnboardingWizard = lazy(() =>
+  import('./components/onboarding/OnboardingWizard').then((m) => ({ default: m.OnboardingWizard })),
+);
+const Alerts = lazy(() => import('./pages/Alerts').then((m) => ({ default: m.Alerts })));
+const Settings = lazy(() => import('./pages/Settings').then((m) => ({ default: m.Settings })));
 
 type Page = 'home' | 'channels' | 'recent' | 'favorites' | 'alerts' | 'settings';
 
@@ -136,6 +143,10 @@ async function applyWindowState(
   await win.setAlwaysOnTop(target.alwaysOnTop);
 }
 
+// macOS convention puts window controls at the left of the titlebar
+// (traffic lights); Windows/Linux put them at the right.
+const isMac = navigator.userAgent.includes('Mac');
+
 const titlebarBtnStyle: CSSProperties = {
   width: 44,
   height: 36,
@@ -184,11 +195,14 @@ function AppContent() {
     status: playerStatus,
     currentChannel,
     volume,
+    muted,
     errorMessage,
+    isBuffering,
     selectChannel,
     play,
     stop,
     setVolume,
+    toggleMute,
     initEventListener,
   } = usePlayerStore();
   const { loaded: libraryLoaded, load: loadLibrary, recordPlay, favorites, toggleFavorite } = useLibraryStore();
@@ -205,6 +219,34 @@ function AppContent() {
   const onboardingActive = settingsLoaded && !settings.onboardingComplete;
   const updateStatus = useUpdateStore((s) => s.status);
   const updateModalActive = updateStatus !== 'idle' && updateStatus !== 'checking';
+
+  // Stable references so the memoized ChannelCard/ChannelListRow (see
+  // components/ChannelCard.tsx, ChannelListRow.tsx) can actually skip
+  // re-rendering when passed these as onClick/onInfo - a plain function
+  // declaration recreated every render would defeat that memoization.
+  const handleOpenChannel = useCallback((streamId: number) => {
+    setModalStreamId(streamId);
+  }, []);
+
+  const handlePlayChannel = useCallback(
+    async (streamId: number) => {
+      const channel = channels.find((c) => c.stream_id === streamId);
+      if (!channel) return;
+      // Switching channels shouldn't leave a timer armed from the previous one.
+      useSleepTimerStore.getState().cancel();
+      try {
+        await selectChannel(
+          channel,
+          { baseUrl: settings.baseUrl, username: settings.username, password: settings.password },
+          settings.streamExtension,
+        );
+        if (libraryLoaded) recordPlay(channel.stream_id);
+      } catch (err) {
+        logError(`playback failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+    [channels, settings.baseUrl, settings.username, settings.password, settings.streamExtension, selectChannel, libraryLoaded, recordPlay],
+  );
 
   useEffect(() => {
     if (onboardingActive && !browserOpen) setBrowserOpen(true);
@@ -250,7 +292,7 @@ function AppContent() {
 
   useEffect(() => {
     if (settingsLoaded) {
-      usePlayerStore.setState({ volume: settings.defaultVolume });
+      usePlayerStore.setState({ volume: settings.volume });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsLoaded]);
@@ -291,9 +333,23 @@ function AppContent() {
 
   useEffect(() => {
     if (!settingsLoaded || channels.length === 0) return;
-    pollNowPlaying(stellarApiKey);
-    const id = setInterval(() => pollNowPlaying(stellarApiKey), 10_000);
-    return () => clearInterval(id);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    async function tick() {
+      await pollNowPlaying(stellarApiKey);
+      if (cancelled) return;
+      // Reschedule using the failure count pollNowPlaying just updated, so a
+      // StellarTunerLog outage backs off instead of polling at a fixed rate.
+      const delay = nextPollDelayMs(useChannelStore.getState().pollFailureCount);
+      timer = setTimeout(tick, delay);
+    }
+
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [settingsLoaded, stellarApiKey, channels, pollNowPlaying]);
 
   useEffect(() => {
@@ -436,25 +492,6 @@ function AppContent() {
     }
   }
 
-  function handleOpenChannel(streamId: number) {
-    setModalStreamId(streamId);
-  }
-
-  async function handlePlayChannel(streamId: number) {
-    const channel = channels.find((c) => c.stream_id === streamId);
-    if (!channel) return;
-    try {
-      await selectChannel(
-        channel,
-        { baseUrl: settings.baseUrl, username: settings.username, password: settings.password },
-        settings.streamExtension,
-      );
-      if (libraryLoaded) recordPlay(channel.stream_id);
-    } catch (err) {
-      logError(`playback failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
   const modalChannel = modalStreamId != null ? channels.find((c) => c.stream_id === modalStreamId) : undefined;
   const win = getCurrentWebviewWindow();
 
@@ -489,25 +526,56 @@ function AppContent() {
         >
           <div
             data-tauri-drag-region
-            style={{ height: 36, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 'none' }}
+            style={{
+              height: 36,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flex: 'none',
+              flexDirection: isMac ? 'row-reverse' : 'row',
+            }}
           >
-            <img src={logoUrl} alt="" width={18} height={18} style={{ marginLeft: 12 }} />
+            <img
+              src={logoUrl}
+              alt=""
+              width={18}
+              height={18}
+              style={{ marginLeft: isMac ? 0 : 12, marginRight: isMac ? 12 : 0 }}
+            />
             <div style={{ display: 'flex' }}>
-              <TitlebarButton label="Minimize" onClick={() => win.minimize()}>
-                <IconMinus size={14} />
-              </TitlebarButton>
-              <TitlebarButton label="Maximize" onClick={() => win.toggleMaximize()}>
-                <IconSquare size={12} />
-              </TitlebarButton>
-              <TitlebarButton label="Quit" onClick={() => win.close()}>
-                <IconX size={14} />
-              </TitlebarButton>
+              {isMac ? (
+                <>
+                  <TitlebarButton label="Quit" onClick={() => win.close()}>
+                    <IconX size={14} />
+                  </TitlebarButton>
+                  <TitlebarButton label="Minimize" onClick={() => win.minimize()}>
+                    <IconMinus size={14} />
+                  </TitlebarButton>
+                  <TitlebarButton label="Maximize" onClick={() => win.toggleMaximize()}>
+                    <IconSquare size={12} />
+                  </TitlebarButton>
+                </>
+              ) : (
+                <>
+                  <TitlebarButton label="Minimize" onClick={() => win.minimize()}>
+                    <IconMinus size={14} />
+                  </TitlebarButton>
+                  <TitlebarButton label="Maximize" onClick={() => win.toggleMaximize()}>
+                    <IconSquare size={12} />
+                  </TitlebarButton>
+                  <TitlebarButton label="Quit" onClick={() => win.close()}>
+                    <IconX size={14} />
+                  </TitlebarButton>
+                </>
+              )}
             </div>
           </div>
 
           <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
             {onboardingActive ? (
-              <OnboardingWizard />
+              <Suspense fallback={null}>
+                <OnboardingWizard />
+              </Suspense>
             ) : (
               <>
                 <div
@@ -564,8 +632,16 @@ function AppContent() {
                   {page === 'channels' && <Channels onSelectChannel={handleOpenChannel} onPlayChannel={handlePlayChannel} />}
                   {page === 'recent' && <Recent onSelectChannel={handleOpenChannel} onPlayChannel={handlePlayChannel} />}
                   {page === 'favorites' && <Favorites onSelectChannel={handleOpenChannel} onPlayChannel={handlePlayChannel} />}
-                  {page === 'alerts' && <Alerts onPlayChannel={handlePlayChannel} />}
-                  {page === 'settings' && <Settings />}
+                  {page === 'alerts' && (
+                    <Suspense fallback={null}>
+                      <Alerts onPlayChannel={handlePlayChannel} />
+                    </Suspense>
+                  )}
+                  {page === 'settings' && (
+                    <Suspense fallback={null}>
+                      <Settings />
+                    </Suspense>
+                  )}
                 </div>
               </>
             )}
@@ -579,6 +655,7 @@ function AppContent() {
             mode={barMode}
             status={playerStatus}
             currentChannel={currentChannel}
+            channelMetadata={currentChannel ? channelMetadata.get(currentChannel.stream_id) : undefined}
             nowPlaying={currentNowPlaying}
             volume={volume}
             isFavorite={currentChannel ? favorites.includes(currentChannel.stream_id) : false}
@@ -586,11 +663,16 @@ function AppContent() {
             onPlus={handlePlus}
             onMinus={handleMinus}
             errorMessage={errorMessage}
+            isBuffering={isBuffering}
             onPlayStop={() => {
-              const action = playerStatus === 'playing' || playerStatus === 'loading' ? stop() : play();
+              const stopping = playerStatus === 'playing' || playerStatus === 'loading';
+              if (stopping) useSleepTimerStore.getState().cancel();
+              const action = stopping ? stop() : play();
               action.catch((err) => logError(`play/stop failed: ${err instanceof Error ? err.message : String(err)}`));
             }}
             onVolumeChange={setVolume}
+            muted={muted}
+            onToggleMute={toggleMute}
             compactVolumePopover={!browserOpen}
             isMiniPlayer={!browserOpen}
           />

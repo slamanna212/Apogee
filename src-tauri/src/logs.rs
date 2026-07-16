@@ -1,3 +1,4 @@
+use std::path::Path;
 use tauri::Manager;
 
 /// `tauri_plugin_log`'s dispatch filter level is fixed at plugin build time
@@ -20,8 +21,28 @@ pub fn set_log_level(verbose: bool) {
 /// `apogee_<date>.log` is created each time the active file rotates) into
 /// one export, so downloading the log doesn't miss the window an earlier
 /// rotation pushed out of the active file.
+/// Rejects destinations that couldn't plausibly have come from the Save
+/// dialog this command is meant to be driven by - reachable as a bare Tauri
+/// command from any JS in the webview, `destination` is otherwise an
+/// unvalidated arbitrary-file-write primitive (log content only, but still).
+fn validate_export_destination(destination: &str) -> Result<(), String> {
+    let path = Path::new(destination);
+    let has_valid_extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("log") || ext.eq_ignore_ascii_case("txt"));
+    if !has_valid_extension {
+        return Err("export destination must end in .log or .txt".into());
+    }
+    if !path.parent().is_some_and(Path::exists) {
+        return Err("export destination's parent directory doesn't exist".into());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn export_log_file(app: tauri::AppHandle, destination: String) -> Result<(), String> {
+    validate_export_destination(&destination)?;
     let log_dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
     let name = app.package_info().name.clone();
 

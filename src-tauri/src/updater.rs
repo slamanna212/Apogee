@@ -21,12 +21,24 @@ pub struct Metadata {
 /// resolve which GitHub release to check against per update channel
 /// (stable vs. beta) and still reuse the plugin's own signature
 /// verification / download / install machinery via the returned resource id.
+/// The frontend only ever passes a `browser_download_url` resolved from the
+/// GitHub releases API (see `fetchQualifyingReleases`/`findLatestJsonAsset`
+/// in src/stores/updateStore.ts), which always resolves to github.com - so
+/// there's a fixed host to check even though the exact URL (which release,
+/// which channel) is chosen by the frontend at runtime.
+const ALLOWED_UPDATE_ENDPOINT_HOST: &str = "github.com";
+
 #[tauri::command]
 pub async fn check_update_at_endpoint<R: Runtime>(
     webview: Webview<R>,
     url: String,
 ) -> Result<Option<Metadata>, String> {
     let endpoint = Url::parse(&url).map_err(|e| e.to_string())?;
+    if endpoint.host_str() != Some(ALLOWED_UPDATE_ENDPOINT_HOST) {
+        return Err(format!(
+            "update endpoint host must be {ALLOWED_UPDATE_ENDPOINT_HOST}"
+        ));
+    }
 
     let updater = webview
         .updater_builder()
@@ -123,8 +135,15 @@ pub async fn download_and_install_update<R: Runtime>(
 
     #[cfg(windows)]
     {
+        // install_windows does synchronous std::fs::create_dir_all/write of a
+        // potentially multi-MB installer - run it on a blocking-pool thread
+        // instead of the async runtime's worker thread, matching the
+        // spawn_blocking pattern already used for blocking IPC in
+        // discord_rpc.rs.
         let version = update.version.clone();
-        install_windows(&app_handle, &version, &bytes)
+        tokio::task::spawn_blocking(move || install_windows(&app_handle, &version, &bytes))
+            .await
+            .map_err(|e| format!("update installer task panicked: {e}"))?
     }
     #[cfg(not(windows))]
     {

@@ -47,7 +47,7 @@ describe('ScrobbleCoordinator', () => {
     vi.useRealTimers();
   });
 
-  it('sends cleaned Songs as now playing and scrobbles once after 25 seconds', async () => {
+  it('marks a track eligible after 25 seconds and scrobbles it once the app closes', async () => {
     const coordinator = new ScrobbleCoordinator();
     const test = provider();
     const current = station();
@@ -59,6 +59,8 @@ describe('ScrobbleCoordinator', () => {
     await vi.advanceTimersByTimeAsync(24_999);
     expect(test.scrobble).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
+    expect(test.scrobble).not.toHaveBeenCalled();
+    coordinator.dispose();
     expect(test.scrobble).toHaveBeenCalledTimes(1);
     expect(test.scrobble).toHaveBeenCalledWith({
       artist: 'Artist',
@@ -66,7 +68,6 @@ describe('ScrobbleCoordinator', () => {
       album: 'Album',
       startedAt: 1767225600,
     });
-    coordinator.dispose();
   });
 
   it('excludes non-Song cuts from now playing and scrobbling', async () => {
@@ -90,8 +91,9 @@ describe('ScrobbleCoordinator', () => {
     expect(test.scrobble).not.toHaveBeenCalled();
     coordinator.update({ status: 'playing', channelId: 1, station: current }, [test.client]);
     await vi.advanceTimersByTimeAsync(15_000);
-    expect(test.scrobble).toHaveBeenCalledTimes(1);
+    expect(test.scrobble).not.toHaveBeenCalled();
     coordinator.dispose();
+    expect(test.scrobble).toHaveBeenCalledTimes(1);
   });
 
   it('resets an unfinished candidate when the channel or track changes', async () => {
@@ -103,6 +105,8 @@ describe('ScrobbleCoordinator', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     expect(test.scrobble).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(20_000);
+    expect(test.scrobble).not.toHaveBeenCalled();
+    coordinator.update({ status: 'playing', channelId: 2, station: station({ title: 'Third' }) }, [test.client]);
     expect(test.scrobble).toHaveBeenCalledTimes(1);
     expect(test.scrobble.mock.calls[0][0].title).toBe('Other');
     coordinator.dispose();
@@ -116,6 +120,8 @@ describe('ScrobbleCoordinator', () => {
       .mockResolvedValueOnce({ accepted: true, ignoredCode: 0, ignoredMessage: null });
     coordinator.update({ status: 'playing', channelId: 1, station: station() }, [test.client]);
     await vi.advanceTimersByTimeAsync(25_000);
+    expect(test.scrobble).not.toHaveBeenCalled();
+    coordinator.update({ status: 'playing', channelId: 2, station: station({ title: 'Other' }) }, [test.client]);
     expect(test.scrobble).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(14_999);
     expect(test.scrobble).toHaveBeenCalledTimes(1);

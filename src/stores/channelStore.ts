@@ -4,7 +4,20 @@ import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel, StellarStation } from '../types/stellarTunerLog';
 import { getLiveStreams, type XtreamCredentials } from '../lib/xtream';
 import { getChannels, getNowPlaying } from '../lib/stellarTunerLog';
-import { buildChannelMetadataMap, buildNowPlayingMap } from '../lib/channelMatcher';
+import { buildChannelMetadataMap, buildNowPlayingMap, nowPlayingMapsEqual } from '../lib/channelMatcher';
+
+const POLL_INTERVAL_MS = 10_000;
+const MAX_POLL_INTERVAL_MS = 2 * 60_000;
+
+/** Exponential backoff (capped) on consecutive StellarTunerLog poll failures, reset to the base interval on the next success. */
+export function nextPollDelayMs(failureCount: number): number {
+  if (failureCount <= 0) return POLL_INTERVAL_MS;
+  return Math.min(POLL_INTERVAL_MS * 2 ** failureCount, MAX_POLL_INTERVAL_MS);
+}
+
+// Persists across channel-list/category changes for the lifetime of the app -
+// stale entries for stream_ids no longer in `channels` are simply never read.
+const stationIdCache = new Map<number, string>();
 
 // The StellarTunerLog channel catalog rarely changes - avoid refetching it on
 // every launch by caching it to disk for a few hours.
@@ -42,6 +55,7 @@ interface ChannelState {
   nowPlaying: Map<number, StellarStation>;
   channelMetadata: Map<number, StellarChannel>;
   metadataStatus: 'idle' | 'loading' | 'loaded' | 'error';
+  pollFailureCount: number;
   fetchChannels: (creds: XtreamCredentials, categoryId: string) => Promise<void>;
   pollNowPlaying: (apiKey?: string) => Promise<void>;
   fetchChannelMetadata: () => Promise<void>;
@@ -54,6 +68,7 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
   nowPlaying: new Map(),
   channelMetadata: new Map(),
   metadataStatus: 'idle',
+  pollFailureCount: 0,
   async fetchChannels(creds, categoryId) {
     set({ status: 'loading', error: null });
     try {
@@ -65,14 +80,21 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
     }
   },
   async pollNowPlaying(apiKey) {
-    const { channels } = get();
+    const { channels, nowPlaying } = get();
     if (channels.length === 0) return;
     try {
       const response = await getNowPlaying(apiKey);
       const stations = Object.values(response.stations);
-      set({ nowPlaying: buildNowPlayingMap(channels, stations) });
+      const next = buildNowPlayingMap(channels, stations, stationIdCache);
+      set({
+        nowPlaying: nowPlayingMapsEqual(nowPlaying, next) ? nowPlaying : next,
+        pollFailureCount: 0,
+      });
     } catch {
-      // transient poll failure - keep showing the last known now-playing data
+      // transient poll failure - keep showing the last known now-playing data,
+      // but track it so the caller can back off instead of polling at a fixed
+      // rate through an outage
+      set((s) => ({ pollFailureCount: s.pollFailureCount + 1 }));
     }
   },
   async fetchChannelMetadata() {

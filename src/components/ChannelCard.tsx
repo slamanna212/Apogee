@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { IconInfoSmall, IconPlayerPlayFilled } from '@tabler/icons-react';
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel, StellarStation } from '../types/stellarTunerLog';
@@ -30,20 +30,21 @@ interface ChannelCardProps {
   metadata?: StellarChannel;
   isFavorite: boolean;
   isPlaying?: boolean;
-  onToggleFavorite: () => void;
-  onClick: () => void;
-  onInfo: () => void;
+  onToggleFavorite: (streamId: number) => void;
+  onClick: (streamId: number) => void;
+  onInfo: (streamId: number) => void;
   nowPlaying?: StellarStation;
 }
 
-export function ChannelCard({ channel, metadata, isFavorite, isPlaying, onToggleFavorite, onClick, onInfo, nowPlaying }: ChannelCardProps) {
+function ChannelCardImpl({ channel, metadata, isFavorite, isPlaying, onToggleFavorite, onClick, onInfo, nowPlaying }: ChannelCardProps) {
   const [hovered, setHovered] = useState(false);
   const [actionHovered, setActionHovered] = useState(false);
   const showPlayButton = hovered && !actionHovered;
   const name = metadata?.marketing_name || channel.name;
   const number = metadata?.channel_number ?? channel.num;
   const logoUrl = metadata?.logos?.color_dark_square?.url || channel.stream_icon;
-  const background = metadata?.dark_bg_color || hashGradient(channel.name);
+  const fallbackGradient = useMemo(() => hashGradient(channel.name), [channel.name]);
+  const background = metadata?.dark_bg_color || fallbackGradient;
   const trackTitle = nowPlaying?.title || name;
   const trackArtist = nowPlaying?.artist;
 
@@ -51,7 +52,7 @@ export function ChannelCard({ channel, metadata, isFavorite, isPlaying, onToggle
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onClick={onClick}
+      onClick={() => onClick(channel.stream_id)}
       role="button"
       style={{ cursor: 'pointer', transform: 'translateZ(0)' }}
     >
@@ -85,6 +86,8 @@ export function ChannelCard({ channel, metadata, isFavorite, isPlaying, onToggle
         <img
           src={logoUrl}
           alt=""
+          loading="lazy"
+          decoding="async"
           style={{
             position: 'absolute',
             inset: 0,
@@ -111,7 +114,7 @@ export function ChannelCard({ channel, metadata, isFavorite, isPlaying, onToggle
       <ChannelActionsMenu
         nowPlaying={nowPlaying}
         isFavorite={isFavorite}
-        onToggleFavorite={onToggleFavorite}
+        onToggleFavorite={() => onToggleFavorite(channel.stream_id)}
         onMouseEnter={() => setActionHovered(true)}
         onMouseLeave={() => setActionHovered(false)}
         triggerStyle={{
@@ -151,6 +154,8 @@ export function ChannelCard({ channel, metadata, isFavorite, isPlaying, onToggle
         <img
           src={logoUrl}
           alt=""
+          loading="lazy"
+          decoding="async"
           style={{
             position: 'absolute',
             top: '50%',
@@ -200,7 +205,7 @@ export function ChannelCard({ channel, metadata, isFavorite, isPlaying, onToggle
       <div
         onClick={(e) => {
           e.stopPropagation();
-          onInfo();
+          onInfo(channel.stream_id);
         }}
         onMouseEnter={() => setActionHovered(true)}
         onMouseLeave={() => setActionHovered(false)}
@@ -262,3 +267,5 @@ export function ChannelCard({ channel, metadata, isFavorite, isPlaying, onToggle
     </div>
   );
 }
+
+export const ChannelCard = memo(ChannelCardImpl);

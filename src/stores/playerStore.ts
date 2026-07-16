@@ -10,9 +10,11 @@ import {
   onMpvEvent,
   stopPlayback,
   setVolume as mpvSetVolume,
+  setMute as mpvSetMute,
 } from '../lib/mpvClient';
 import { buildStreamUrl, type XtreamCredentials } from '../lib/xtream';
-import { onMediaControlEvent, setMediaPlayback } from '../lib/mediaSession';
+import { onMediaControlEvent, setMediaPlayback, setMediaVolume } from '../lib/mediaSession';
+import { useSettingsStore } from './settingsStore';
 
 // Plain console.* calls only reach a devtools console (invisible in a
 // production build) - @tauri-apps/plugin-log's functions instead invoke the
@@ -43,6 +45,7 @@ interface PlayerActions {
   play: () => Promise<void>;
   stop: () => Promise<void>;
   setVolume: (volume: number) => Promise<void>;
+  toggleMute: () => Promise<void>;
 }
 
 type PlayerStore = PlayerState & PlayerActions;
@@ -50,6 +53,10 @@ type PlayerStore = PlayerState & PlayerActions;
 let listening = false;
 let fallbackTimer: ReturnType<typeof setInterval> | null = null;
 let fallbackStartTimer: ReturnType<typeof setTimeout> | null = null;
+// Volume slider onChange fires on every pointer-move while dragging - debounce
+// writing to settings.json so a drag doesn't hammer disk with one save per tick.
+const VOLUME_PERSIST_DEBOUNCE_MS = 400;
+let volumePersistTimer: ReturnType<typeof setTimeout> | null = null;
 // Last connected stream URL, kept around so `play()` can reconnect after a
 // `stop()` without needing the channel to be reselected from the list.
 let lastStreamUrl: string | null = null;
@@ -108,13 +115,14 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
     stopConnectTimeout();
     stopHeartbeat();
     lastStreamUrl = url;
-    set({ status: 'loading', bitrateKbps: null, errorMessage: null });
+    set({ status: 'loading', bitrateKbps: null, errorMessage: null, isBuffering: false });
     // Never log `url` itself - it embeds the Xtream username/password
     // (see buildStreamUrl), and this ends up in an exportable log file.
     logInfo(`connecting to channel ${get().currentChannel?.name ?? streamId} (attempt ${connectAttempt + 1}/${MAX_CONNECT_ATTEMPTS})`);
     try {
       await loadUrl(url);
       await mpvSetVolume(get().volume);
+      if (get().muted) await mpvSetMute(true);
       // Status flips to 'playing' once mpv reports 'playback-restart' (see
       // initEventListener), which fires only after buffering actually completes.
 
@@ -168,9 +176,11 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
   return {
     status: 'idle',
     currentChannel: null,
-    volume: 70,
+    volume: 80,
+    muted: false,
     bitrateKbps: null,
     errorMessage: null,
+    isBuffering: false,
 
     initEventListener() {
       if (listening) return;
@@ -187,7 +197,7 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
             const channel = get().currentChannel;
             logInfo(`playback started for channel ${channel?.name ?? channel?.stream_id}`);
             stopConnectTimeout();
-            set({ status: 'playing' });
+            set({ status: 'playing', isBuffering: false });
             setMediaPlayback(true);
             if (channel) startHeartbeat(channel.stream_id);
           }
@@ -225,12 +235,19 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
           // populates audio-bitrate live (see PLAN.md section 5).
           set({ bitrateKbps: Math.round(event.data / 1000) });
           stopFallbackPolling();
+        } else if (event.event === 'property-change' && event.name === 'core-idle') {
+          // mpv stalled waiting on data mid-playback (e.g. a network hiccup) -
+          // distinct from the initial-connect 'loading' status, which already
+          // covers first-time buffering via its own spinner/"Connecting…" UI.
+          set({ isBuffering: event.data === true });
         }
       });
-      onMediaControlEvent((kind) => {
+      onMediaControlEvent((kind, value) => {
         if (!get().currentChannel) return;
         if (kind === 'play') {
           get().play();
+        } else if (kind === 'volume' && value != null) {
+          get().setVolume(Math.round(value * 100));
         } else {
           // 'pause' and 'toggle' both mean "stop" - live radio has no pause.
           get().stop();
@@ -259,14 +276,37 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
       stopHeartbeat();
       connectAttempt = 0;
       await stopPlayback();
-      set({ status: 'stopped', bitrateKbps: null });
+      set({ status: 'stopped', bitrateKbps: null, isBuffering: false });
       await setMediaPlayback(false);
     },
 
     async setVolume(volume) {
+      // Dragging the slider while muted would otherwise look like it's doing
+      // nothing (audio stays silent) - unmute so it takes audible effect.
+      if (get().muted) {
+        set({ muted: false });
+        if (get().currentChannel) await mpvSetMute(false);
+      }
       set({ volume });
       if (get().currentChannel) {
         await mpvSetVolume(volume);
+      }
+      // Echo back to the OS media widget unconditionally (not just for
+      // MPRIS-originated changes) - the MPRIS spec requires this after any
+      // volume change or the widget's own slider drifts out of sync.
+      await setMediaVolume(volume / 100);
+      if (volumePersistTimer) clearTimeout(volumePersistTimer);
+      volumePersistTimer = setTimeout(() => {
+        volumePersistTimer = null;
+        useSettingsStore.getState().update({ volume });
+      }, VOLUME_PERSIST_DEBOUNCE_MS);
+    },
+
+    async toggleMute() {
+      const next = !get().muted;
+      set({ muted: next });
+      if (get().currentChannel) {
+        await mpvSetMute(next);
       }
     },
   };

@@ -11,6 +11,7 @@ pub struct MediaSessionState(pub Mutex<Option<MediaControls>>);
 #[derive(Clone, Serialize)]
 struct MediaEventPayload {
     kind: &'static str,
+    value: Option<f64>,
 }
 
 pub fn init(app: &AppHandle) -> Result<MediaControls, String> {
@@ -36,15 +37,16 @@ pub fn init(app: &AppHandle) -> Result<MediaControls, String> {
     let app_handle = app.clone();
     controls
         .attach(move |event: MediaControlEvent| {
-            let kind = match event {
-                MediaControlEvent::Play => Some("play"),
-                MediaControlEvent::Pause => Some("pause"),
-                MediaControlEvent::Toggle => Some("toggle"),
+            let payload = match event {
+                MediaControlEvent::Play => Some(MediaEventPayload { kind: "play", value: None }),
+                MediaControlEvent::Pause => Some(MediaEventPayload { kind: "pause", value: None }),
+                MediaControlEvent::Toggle => Some(MediaEventPayload { kind: "toggle", value: None }),
+                MediaControlEvent::SetVolume(v) => Some(MediaEventPayload { kind: "volume", value: Some(v) }),
                 // Next/Previous/Seek/etc. have no meaning for a live radio tuner - ignored intentionally.
                 _ => None,
             };
-            if let Some(kind) = kind {
-                let _ = app_handle.emit("media-control-event", MediaEventPayload { kind });
+            if let Some(payload) = payload {
+                let _ = app_handle.emit("media-control-event", payload);
             }
         })
         .map_err(|e| e.to_string())?;
@@ -72,6 +74,26 @@ pub fn media_session_set_metadata(
             })
             .map_err(|e| e.to_string())?;
     }
+    Ok(())
+}
+
+// souvlaki's MediaControls::set_volume only exists on the Linux/mpris
+// platform backend (macOS/Windows/empty backends have no such method) - the
+// MPRIS spec requires the app to echo volume changes back to the media
+// widget after every change, not just ones that originated from it.
+#[cfg(target_os = "linux")]
+#[tauri::command]
+pub fn media_session_set_volume(state: State<'_, MediaSessionState>, volume: f64) -> Result<(), String> {
+    let mut guard = state.0.lock().map_err(|e| e.to_string())?;
+    if let Some(controls) = guard.as_mut() {
+        controls.set_volume(volume).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+#[tauri::command]
+pub fn media_session_set_volume(_state: State<'_, MediaSessionState>, _volume: f64) -> Result<(), String> {
     Ok(())
 }
 

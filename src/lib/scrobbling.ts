@@ -45,7 +45,7 @@ interface Candidate {
   accumulatedMs: number;
   activeSince: number | null;
   nowPlayingSent: boolean;
-  scrobbled: boolean;
+  eligible: boolean;
   thresholdTimer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -125,7 +125,7 @@ export class ScrobbleCoordinator {
         accumulatedMs: 0,
         activeSince: null,
         nowPlayingSent: false,
-        scrobbled: false,
+        eligible: false,
         thresholdTimer: null,
       };
     } else {
@@ -154,12 +154,12 @@ export class ScrobbleCoordinator {
   }
 
   private scheduleThreshold(state: ProviderState, candidate: Candidate) {
-    if (candidate.scrobbled || candidate.thresholdTimer) return;
+    if (candidate.eligible || candidate.thresholdTimer) return;
     const elapsed = candidate.accumulatedMs + (candidate.activeSince === null ? 0 : Date.now() - candidate.activeSince);
     const remaining = Math.max(0, SCROBBLE_THRESHOLD_MS - elapsed);
     candidate.thresholdTimer = setTimeout(() => {
       candidate.thresholdTimer = null;
-      if (state.candidate !== candidate || candidate.activeSince === null || candidate.scrobbled) return;
+      if (state.candidate !== candidate || candidate.activeSince === null || candidate.eligible) return;
       const now = Date.now();
       candidate.accumulatedMs += now - candidate.activeSince;
       candidate.activeSince = now;
@@ -167,11 +167,7 @@ export class ScrobbleCoordinator {
         this.scheduleThreshold(state, candidate);
         return;
       }
-      candidate.scrobbled = true;
-      if (candidate.startedAt !== null) {
-        state.queue.push({ payload: { ...candidate.track, startedAt: candidate.startedAt }, attempt: 0 });
-        void this.processQueue(state);
-      }
+      candidate.eligible = true;
     }, remaining);
   }
 
@@ -187,8 +183,16 @@ export class ScrobbleCoordinator {
   }
 
   private clearCandidate(state: ProviderState) {
-    if (!state.candidate) return;
-    this.pauseCandidate(state.candidate);
+    const candidate = state.candidate;
+    if (!candidate) return;
+    this.pauseCandidate(candidate);
+    if (!candidate.eligible && candidate.accumulatedMs >= SCROBBLE_THRESHOLD_MS) {
+      candidate.eligible = true;
+    }
+    if (candidate.eligible && candidate.startedAt !== null) {
+      state.queue.push({ payload: { ...candidate.track, startedAt: candidate.startedAt }, attempt: 0 });
+      void this.processQueue(state);
+    }
     state.candidate = null;
   }
 

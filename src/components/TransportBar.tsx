@@ -1,11 +1,12 @@
 import { useRef, useState, type CSSProperties } from 'react';
 import { Modal, Popover, Text } from '@mantine/core';
-import { IconVolume, IconVolume2 } from '@tabler/icons-react';
+import { IconVolume, IconVolume2, IconVolumeOff } from '@tabler/icons-react';
 import type { XtreamChannel } from '../types/xtream';
-import type { StellarStation } from '../types/stellarTunerLog';
+import type { StellarChannel, StellarStation } from '../types/stellarTunerLog';
 import type { PlayerStatus } from '../types/player';
 import { CutTypeBadge } from './CutTypeBadge';
 import { ChannelActionsMenu } from './ChannelActionsMenu';
+import { ChannelArtwork } from './ChannelArtwork';
 import { Waveform } from './Waveform';
 
 export type BarMode = 'expanded' | 'collapsed';
@@ -14,8 +15,10 @@ interface TransportBarProps {
   mode: BarMode;
   status: PlayerStatus;
   currentChannel: XtreamChannel | null;
+  channelMetadata?: StellarChannel;
   nowPlaying?: StellarStation;
   errorMessage?: string | null;
+  isBuffering?: boolean;
   volume: number;
   isFavorite?: boolean;
   onToggleFavorite?: () => void;
@@ -23,6 +26,8 @@ interface TransportBarProps {
   onMinus: () => void;
   onPlayStop: () => void;
   onVolumeChange: (volume: number) => void;
+  muted: boolean;
+  onToggleMute: () => void;
   /** True when running as the standalone mini player window (not the full app), which is short and needs the volume popover to open sideways instead of upward. */
   compactVolumePopover?: boolean;
   /** True when running as the standalone mini player window; the artwork expand modal looks wrong in that tiny window, so clicking artwork is disabled there. */
@@ -277,14 +282,34 @@ function HorizontalVolumeSlider({
   );
 }
 
+function MuteIcon({ muted, onToggleMute }: { muted: boolean; onToggleMute: () => void }) {
+  return (
+    <span
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggleMute();
+      }}
+      role="button"
+      aria-label={muted ? 'Unmute' : 'Mute'}
+      style={{ display: 'flex', cursor: 'pointer', flex: 'none' }}
+    >
+      {muted ? <IconVolumeOff size={12} style={{ color: 'var(--app-accent)' }} /> : <IconVolume2 size={12} style={{ color: 'var(--app-dim)' }} />}
+    </span>
+  );
+}
+
 function VolumeControl({
   volume,
   onChange,
   compact,
+  muted,
+  onToggleMute,
 }: {
   volume: number;
   onChange: (v: number) => void;
   compact?: boolean;
+  muted: boolean;
+  onToggleMute: () => void;
 }) {
   const [opened, setOpened] = useState(false);
 
@@ -316,7 +341,7 @@ function VolumeControl({
       {compact ? (
         <Popover.Dropdown className="apogee-glass" style={{ borderRadius: 20, padding: '0 14px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 36 }}>
-            <IconVolume2 size={12} style={{ color: 'var(--app-dim)', flex: 'none' }} />
+            <MuteIcon muted={muted} onToggleMute={onToggleMute} />
             <HorizontalVolumeSlider volume={volume} onChange={onChange} />
             <Text size="xs" fw={600} c="dimmed" style={{ flex: 'none', width: 28 }}>
               {volume}%
@@ -330,7 +355,7 @@ function VolumeControl({
               {volume}%
             </Text>
             <VerticalVolumeSlider volume={volume} onChange={onChange} />
-            <IconVolume2 size={12} style={{ color: 'var(--app-dim)' }} />
+            <MuteIcon muted={muted} onToggleMute={onToggleMute} />
           </div>
         </Popover.Dropdown>
       )}
@@ -355,14 +380,18 @@ const dotsButtonStyle: CSSProperties = {
 function BarContent({
   status,
   currentChannel,
+  channelMetadata,
   nowPlaying,
   errorMessage,
+  isBuffering,
   onArtworkClick,
 }: {
   status: PlayerStatus;
   currentChannel: XtreamChannel | null;
+  channelMetadata?: StellarChannel;
   nowPlaying?: StellarStation;
   errorMessage?: string | null;
+  isBuffering?: boolean;
   onArtworkClick?: (artworkUrl: string) => void;
 }) {
   if (!currentChannel) {
@@ -444,30 +473,21 @@ function BarContent({
     );
   }
 
-  const artwork = nowPlaying?.artwork_url || currentChannel.stream_icon;
+  const artwork = nowPlaying?.artwork_url;
   const title = nowPlaying?.title || currentChannel.name;
   const subtitleParts = [nowPlaying?.artist, nowPlaying?.album].filter(Boolean);
 
   return (
     <>
-      {artwork ? (
-        <img
-          src={artwork}
-          alt=""
-          onClick={onArtworkClick ? () => onArtworkClick(artwork) : undefined}
-          style={{
-            width: 56,
-            height: 56,
-            borderRadius: 14,
-            objectFit: 'cover',
-            flex: 'none',
-            background: 'var(--app-panel2)',
-            cursor: onArtworkClick ? 'pointer' : 'default',
-          }}
-        />
-      ) : (
-        <div style={{ width: 56, height: 56, borderRadius: 14, background: 'var(--app-panel2)', flex: 'none' }} />
-      )}
+      <ChannelArtwork
+        channelName={currentChannel.name}
+        streamIcon={currentChannel.stream_icon}
+        metadata={channelMetadata}
+        artworkUrl={artwork}
+        size={56}
+        radius={14}
+        onClick={onArtworkClick && artwork ? () => onArtworkClick(artwork) : undefined}
+      />
       <div data-tauri-drag-region style={{ flex: '1 1 auto', minWidth: 0 }}>
         <div
           data-tauri-drag-region
@@ -514,6 +534,11 @@ function BarContent({
         )}
       </div>
       <CutTypeBadge cutType={nowPlaying?.cut_type} />
+      {isBuffering && status === 'playing' && (
+        <Text size="xs" c="orange" style={{ flex: 'none' }} title="Buffering">
+          ● Buffering
+        </Text>
+      )}
       <Waveform active={status === 'playing'} />
     </>
   );
@@ -524,11 +549,13 @@ function CollapsedInfo({
   currentChannel,
   nowPlaying,
   errorMessage,
+  isBuffering,
 }: {
   status: PlayerStatus;
   currentChannel: XtreamChannel | null;
   nowPlaying?: StellarStation;
   errorMessage?: string | null;
+  isBuffering?: boolean;
 }) {
   if (!currentChannel) {
     return (
@@ -539,7 +566,7 @@ function CollapsedInfo({
   }
 
   const title = status === 'error' ? 'Playback error' : nowPlaying?.title || currentChannel.name;
-  const subtitle = status === 'loading' ? 'Connecting…' : nowPlaying?.artist;
+  const subtitle = status === 'loading' ? 'Connecting…' : isBuffering && status === 'playing' ? 'Buffering…' : nowPlaying?.artist;
 
   return (
     <div data-tauri-drag-region style={{ flex: 'none', maxWidth: 150, minWidth: 0 }} title={status === 'error' ? errorMessage ?? undefined : undefined}>
@@ -577,8 +604,10 @@ export function TransportBar({
   mode,
   status,
   currentChannel,
+  channelMetadata,
   nowPlaying,
   errorMessage,
+  isBuffering,
   volume,
   isFavorite,
   onToggleFavorite,
@@ -586,6 +615,8 @@ export function TransportBar({
   onMinus,
   onPlayStop,
   onVolumeChange,
+  muted,
+  onToggleMute,
   compactVolumePopover,
   isMiniPlayer,
 }: TransportBarProps) {
@@ -613,7 +644,6 @@ export function TransportBar({
   );
 
   if (mode === 'collapsed') {
-    const artwork = nowPlaying?.artwork_url || currentChannel?.stream_icon;
     return (
       <>
         {artworkModal}
@@ -633,16 +663,19 @@ export function TransportBar({
         >
           <PlusMinus onPlus={onPlus} onMinus={onMinus} compact />
           <PlayStopButton status={status} onClick={onPlayStop} disabled={!currentChannel} size={36} />
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--app-panel2)', flex: 'none', overflow: 'hidden' }}>
-            {artwork && (
-              <img
-                src={artwork}
-                alt=""
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              />
-            )}
-          </div>
-          <CollapsedInfo status={status} currentChannel={currentChannel} nowPlaying={nowPlaying} errorMessage={errorMessage} />
+          {currentChannel ? (
+            <ChannelArtwork
+              channelName={currentChannel.name}
+              streamIcon={currentChannel.stream_icon}
+              metadata={channelMetadata}
+              artworkUrl={nowPlaying?.artwork_url}
+              size={36}
+              radius={10}
+            />
+          ) : (
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--app-panel2)', flex: 'none' }} />
+          )}
+          <CollapsedInfo status={status} currentChannel={currentChannel} nowPlaying={nowPlaying} errorMessage={errorMessage} isBuffering={isBuffering} />
           <Waveform active={status === 'playing'} bands={4} size="sm" />
         </div>
       </>
@@ -670,11 +703,13 @@ export function TransportBar({
         <BarContent
           status={status}
           currentChannel={currentChannel}
+          channelMetadata={channelMetadata}
           nowPlaying={nowPlaying}
           errorMessage={errorMessage}
+          isBuffering={isBuffering}
           onArtworkClick={isMiniPlayer ? undefined : setExpandedArtwork}
         />
-        <VolumeControl volume={volume} onChange={onVolumeChange} compact={compactVolumePopover} />
+        <VolumeControl volume={volume} onChange={onVolumeChange} compact={compactVolumePopover} muted={muted} onToggleMute={onToggleMute} />
         {currentChannel && (
           <ChannelActionsMenu
             nowPlaying={nowPlaying}

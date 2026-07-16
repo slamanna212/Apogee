@@ -1,5 +1,6 @@
-import { useMemo, useRef, type ReactNode } from 'react';
-import { IconLayoutGrid, IconLayoutList } from '@tabler/icons-react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { Text } from '@mantine/core';
+import { IconLayoutGrid, IconLayoutList, IconSearch, IconX } from '@tabler/icons-react';
 import { ChannelCard, CHANNEL_CARD_MIN_WIDTH, CHANNEL_CARD_GAP } from './ChannelCard';
 import { ChannelListRow } from './ChannelListRow';
 import { JumpRail } from './JumpRail';
@@ -44,10 +45,17 @@ export function ChannelGrid({
   const containerRef = useRef<HTMLDivElement>(null);
   const favoriteSet = useMemo(() => new Set(favorites), [favorites]);
   const sortable = sortMode != null && onSortModeChange != null;
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const filtered = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return channels;
+    return channels.filter((c) => (channelMetadata.get(c.stream_id)?.marketing_name || c.name).toLowerCase().includes(q));
+  }, [channels, channelMetadata, searchTerm]);
 
   const sorted = useMemo(() => {
-    if (!sortable) return channels;
-    const list = [...channels];
+    if (!sortable) return filtered;
+    const list = [...filtered];
     if (sortMode === 'az') {
       list.sort((a, b) =>
         (channelMetadata.get(a.stream_id)?.marketing_name || a.name).localeCompare(
@@ -62,7 +70,7 @@ export function ChannelGrid({
       );
     }
     return list;
-  }, [channels, channelMetadata, sortMode, sortable]);
+  }, [filtered, channelMetadata, sortMode, sortable]);
 
   const groups = useMemo(() => {
     if (!sortable) return [];
@@ -83,11 +91,29 @@ export function ChannelGrid({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, paddingRight: sortable ? 70 : 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, paddingRight: sortable && !searchTerm ? 70 : 0 }}>
         <div style={{ font: '700 24px "Space Grotesk", sans-serif' }}>
-          {title} <span style={{ color: 'var(--app-dim2)', font: '400 14px "Sora", sans-serif' }}>{channels.length}</span>
+          {title} <span style={{ color: 'var(--app-dim2)', font: '400 14px "Sora", sans-serif' }}>{sorted.length}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--app-panel)', border: '1px solid var(--app-border)', borderRadius: 999, padding: '0 12px', height: 32, width: 160 }}>
+            <IconSearch size={14} style={{ color: 'var(--app-dim)', flex: 'none' }} />
+            <input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search channels"
+              style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--app-text)', font: '400 12px "Sora", sans-serif', width: '100%' }}
+            />
+            {searchTerm && (
+              <IconX
+                size={14}
+                role="button"
+                aria-label="Clear search"
+                onClick={() => setSearchTerm('')}
+                style={{ color: 'var(--app-dim)', cursor: 'pointer', flex: 'none' }}
+              />
+            )}
+          </div>
           <div style={{ display: 'flex', background: 'var(--app-panel)', border: '1px solid var(--app-border)', borderRadius: 999, padding: 3 }}>
             {(['list', 'grid'] as const).map((mode) => (
               <div
@@ -134,8 +160,10 @@ export function ChannelGrid({
           )}
         </div>
       </div>
-      {sorted.length === 0 && emptyState ? (
+      {channels.length === 0 && emptyState ? (
         emptyState
+      ) : sorted.length === 0 && searchTerm ? (
+        <Text c="dimmed">No channels match &quot;{searchTerm}&quot;.</Text>
       ) : (
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <div ref={containerRef} style={{ flex: 1, overflowY: 'auto', padding: '4px 20px 4px 4px' }}>
@@ -148,9 +176,9 @@ export function ChannelGrid({
                     metadata={channelMetadata.get(channel.stream_id)}
                     isFavorite={favoriteSet.has(channel.stream_id)}
                     isPlaying={channel.stream_id === currentChannelId}
-                    onToggleFavorite={() => onToggleFavorite(channel.stream_id)}
-                    onClick={() => onPlay(channel.stream_id)}
-                    onInfo={() => onSelect(channel.stream_id)}
+                    onToggleFavorite={onToggleFavorite}
+                    onClick={onPlay}
+                    onInfo={onSelect}
                     nowPlaying={nowPlaying?.get(channel.stream_id)}
                   />
                 ))}
@@ -164,16 +192,16 @@ export function ChannelGrid({
                     metadata={channelMetadata.get(channel.stream_id)}
                     isFavorite={favoriteSet.has(channel.stream_id)}
                     isPlaying={channel.stream_id === currentChannelId}
-                    onToggleFavorite={() => onToggleFavorite(channel.stream_id)}
-                    onClick={() => onPlay(channel.stream_id)}
-                    onInfo={() => onSelect(channel.stream_id)}
+                    onToggleFavorite={onToggleFavorite}
+                    onClick={onPlay}
+                    onInfo={onSelect}
                     nowPlaying={nowPlaying?.get(channel.stream_id)}
                   />
                 ))}
               </div>
             )}
           </div>
-          {sortable && <JumpRail groups={groups} totalCount={sorted.length} containerRef={containerRef} />}
+          {sortable && !searchTerm && <JumpRail groups={groups} totalCount={sorted.length} containerRef={containerRef} />}
         </div>
       )}
     </div>
