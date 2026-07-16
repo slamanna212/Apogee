@@ -46,6 +46,7 @@ export function ChannelArtwork({ channelName, streamIcon, metadata, artworkUrl, 
           flex: 'none',
           background: 'var(--app-panel2)',
           cursor: onClick ? 'pointer' : 'default',
+          transform: 'translateZ(0)',
           ...style,
         }}
       />
@@ -68,6 +69,7 @@ export function ChannelArtwork({ channelName, streamIcon, metadata, artworkUrl, 
         alignItems: 'center',
         justifyContent: 'center',
         cursor: onClick ? 'pointer' : 'default',
+        transform: 'translateZ(0)',
         ...style,
       }}
     >

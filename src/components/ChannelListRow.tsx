@@ -55,6 +55,7 @@ function ChannelListRowImpl({
         borderRadius: 16,
         padding: '6px 14px',
         cursor: 'pointer',
+        transform: 'translateZ(0)',
       }}
     >
       <div style={{ width: 92, flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
@@ -65,7 +66,7 @@ function ChannelListRowImpl({
               alt=""
               loading="lazy"
               decoding="async"
-              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              style={{ width: '100%', height: '100%', objectFit: 'contain', transform: 'translateZ(0)' }}
             />
           ) : (
             <div style={{ width: '70%', height: '70%', borderRadius: 8, background: 'var(--app-panel2)' }} />
