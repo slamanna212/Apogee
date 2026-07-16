@@ -41,7 +41,9 @@ pub struct MpvState {
 #[cfg(target_os = "linux")]
 fn find_on_path(name: &str) -> Option<PathBuf> {
     let path_var = std::env::var_os("PATH")?;
-    std::env::split_paths(&path_var).map(|dir| dir.join(name)).find(|candidate| candidate.is_file())
+    std::env::split_paths(&path_var)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
 }
 
 fn resolve_mpv_path(app: &AppHandle) -> String {
@@ -75,7 +77,11 @@ fn resolve_mpv_path(app: &AppHandle) -> String {
     // prefixes explicitly before falling back to plain PATH resolution
     // (which still covers any other manual install already on PATH).
     #[cfg(target_os = "macos")]
-    for candidate in ["/opt/homebrew/bin/mpv", "/usr/local/bin/mpv", "/opt/local/bin/mpv"] {
+    for candidate in [
+        "/opt/homebrew/bin/mpv",
+        "/usr/local/bin/mpv",
+        "/opt/local/bin/mpv",
+    ] {
         if std::path::Path::new(candidate).exists() {
             return candidate.to_string();
         }
@@ -93,7 +99,12 @@ async fn push_stderr_tail(tail: &Arc<Mutex<VecDeque<String>>>, line: String) {
 }
 
 async fn stderr_tail_string(tail: &Arc<Mutex<VecDeque<String>>>) -> String {
-    tail.lock().await.iter().cloned().collect::<Vec<_>>().join(" | ")
+    tail.lock()
+        .await
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" | ")
 }
 
 /// Masks the Xtream username/password segment of a stream URL
@@ -338,7 +349,11 @@ async fn ensure_started(app: &AppHandle, state: &MpvState) -> Result<(), String>
     for _ in 0..50 {
         if let Ok(Some(status)) = child.try_wait() {
             let tail = stderr_tail_string(&state.stderr_tail).await;
-            let suffix = if tail.is_empty() { String::new() } else { format!(" - {tail}") };
+            let suffix = if tail.is_empty() {
+                String::new()
+            } else {
+                format!(" - {tail}")
+            };
             let message = format!("mpv exited immediately (status: {status}){suffix}");
             log::error!("{message}");
             return Err(message);
@@ -356,7 +371,11 @@ async fn ensure_started(app: &AppHandle, state: &MpvState) -> Result<(), String>
         None => {
             let _ = child.start_kill();
             let tail = stderr_tail_string(&state.stderr_tail).await;
-            let suffix = if tail.is_empty() { String::new() } else { format!(" - mpv output: {tail}") };
+            let suffix = if tail.is_empty() {
+                String::new()
+            } else {
+                format!(" - mpv output: {tail}")
+            };
             let message = format!("timed out connecting to mpv IPC{suffix}");
             log::error!("{message}");
             return Err(message);
@@ -395,7 +414,11 @@ async fn ensure_started(app: &AppHandle, state: &MpvState) -> Result<(), String>
         // mpv_load call would silently fail in send_command instead of
         // respawning mpv.
         let tail = stderr_tail_string(&stderr_tail_for_reader).await;
-        let suffix = if tail.is_empty() { String::new() } else { format!(" - {tail}") };
+        let suffix = if tail.is_empty() {
+            String::new()
+        } else {
+            format!(" - {tail}")
+        };
         log::error!("mpv IPC connection closed unexpectedly{suffix}");
         *inner_for_reader.lock().await = None;
         let _ = app_clone.emit("mpv-event", json!({ "event": "apogee-ipc-closed" }));
@@ -407,13 +430,25 @@ async fn ensure_started(app: &AppHandle, state: &MpvState) -> Result<(), String>
     });
     drop(guard);
 
-    send_command(state, json!({ "command": ["observe_property", 1, "audio-bitrate"] })).await?;
+    send_command(
+        state,
+        json!({ "command": ["observe_property", 1, "audio-bitrate"] }),
+    )
+    .await?;
     // core-idle (stalled waiting for data) and eof-reached surface rebuffering
     // /stall conditions mid-playback as debug-level property-change events -
     // the main signal this was missing for chasing intermittent Mac issues
     // that don't produce a hard error, just dead air.
-    send_command(state, json!({ "command": ["observe_property", 2, "core-idle"] })).await?;
-    send_command(state, json!({ "command": ["observe_property", 3, "eof-reached"] })).await?;
+    send_command(
+        state,
+        json!({ "command": ["observe_property", 2, "core-idle"] }),
+    )
+    .await?;
+    send_command(
+        state,
+        json!({ "command": ["observe_property", 3, "eof-reached"] }),
+    )
+    .await?;
 
     Ok(())
 }
@@ -421,18 +456,28 @@ async fn ensure_started(app: &AppHandle, state: &MpvState) -> Result<(), String>
 async fn send_command(state: &MpvState, cmd: Value) -> Result<(), String> {
     log::debug!("mpv command: {}", describe_command_for_log(&cmd));
     let mut guard = state.inner.lock().await;
-    let inner = guard.as_mut().ok_or_else(|| "mpv not started".to_string())?;
+    let inner = guard
+        .as_mut()
+        .ok_or_else(|| "mpv not started".to_string())?;
     let mut payload = cmd.to_string();
     payload.push('\n');
-    inner.writer.write_all(payload.as_bytes()).await.map_err(|e| {
-        let message = format!("failed to write to mpv IPC: {e}");
-        log::error!("{message}");
-        message
-    })
+    inner
+        .writer
+        .write_all(payload.as_bytes())
+        .await
+        .map_err(|e| {
+            let message = format!("failed to write to mpv IPC: {e}");
+            log::error!("{message}");
+            message
+        })
 }
 
 #[tauri::command]
-pub async fn mpv_load(app: AppHandle, state: State<'_, MpvState>, url: String) -> Result<(), String> {
+pub async fn mpv_load(
+    app: AppHandle,
+    state: State<'_, MpvState>,
+    url: String,
+) -> Result<(), String> {
     log::debug!("mpv_load: {}", redact_credentials(&url));
     ensure_started(&app, &state).await?;
     send_command(&state, json!({ "command": ["loadfile", url, "replace"] })).await
@@ -445,7 +490,11 @@ pub async fn mpv_stop(state: State<'_, MpvState>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn mpv_set_volume(state: State<'_, MpvState>, volume: u8) -> Result<(), String> {
-    send_command(&state, json!({ "command": ["set_property", "volume", volume] })).await
+    send_command(
+        &state,
+        json!({ "command": ["set_property", "volume", volume] }),
+    )
+    .await
 }
 
 /// Fixed request_id so the frontend can correlate the async IPC reply on the

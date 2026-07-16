@@ -4,7 +4,11 @@
 /// command exists purely to plug that gap by talking to `notify-rust` directly with
 /// the hint set. It's a no-op on other platforms, where the plugin's own path works.
 #[tauri::command]
-pub fn send_os_notification(app: tauri::AppHandle, title: String, body: String) -> Result<(), String> {
+pub fn send_os_notification(
+    app: tauri::AppHandle,
+    title: String,
+    body: String,
+) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
         let identifier = app.config().identifier.clone();

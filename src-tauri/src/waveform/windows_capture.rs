@@ -16,7 +16,9 @@ pub(super) async fn open_windows_capture_source() -> io::Result<CaptureSource> {
     let device = host
         .default_output_device()
         .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "no default audio output device"))?;
-    let device_name = device.name().unwrap_or_else(|_| "unknown device".to_string());
+    let device_name = device
+        .name()
+        .unwrap_or_else(|_| "unknown device".to_string());
     log::info!("waveform: opening WASAPI loopback on default output device '{device_name}'");
 
     let config = device
@@ -47,7 +49,9 @@ pub(super) async fn open_windows_capture_source() -> io::Result<CaptureSource> {
                 &stream_config,
                 {
                     let tx = tx.clone();
-                    move |data: &[f32], _: &cpal::InputCallbackInfo| send_downmixed(&tx, data, channels, |s| s)
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        send_downmixed(&tx, data, channels, |s| s)
+                    }
                 },
                 err_fn,
                 None,
@@ -86,13 +90,17 @@ pub(super) async fn open_windows_capture_source() -> io::Result<CaptureSource> {
         let stream = match stream_result {
             Ok(stream) => stream,
             Err(e) => {
-                let _ = ready_tx.send(Err(io::Error::other(format!("failed to build WASAPI loopback stream: {e}"))));
+                let _ = ready_tx.send(Err(io::Error::other(format!(
+                    "failed to build WASAPI loopback stream: {e}"
+                ))));
                 return;
             }
         };
 
         if let Err(e) = stream.play() {
-            let _ = ready_tx.send(Err(io::Error::other(format!("failed to start WASAPI loopback stream: {e}"))));
+            let _ = ready_tx.send(Err(io::Error::other(format!(
+                "failed to start WASAPI loopback stream: {e}"
+            ))));
             return;
         }
 
@@ -108,12 +116,23 @@ pub(super) async fn open_windows_capture_source() -> io::Result<CaptureSource> {
         drop(tx);
     });
 
-    ready_rx.recv().map_err(|_| io::Error::other("WASAPI capture thread ended before starting"))??;
+    ready_rx
+        .recv()
+        .map_err(|_| io::Error::other("WASAPI capture thread ended before starting"))??;
 
-    Ok(CaptureSource { rx, sample_rate, backend_name: "WASAPI loopback" })
+    Ok(CaptureSource {
+        rx,
+        sample_rate,
+        backend_name: "WASAPI loopback",
+    })
 }
 
-fn send_downmixed<T: Copy>(tx: &mpsc::Sender<Vec<f32>>, data: &[T], channels: usize, to_f32: impl Fn(T) -> f32) {
+fn send_downmixed<T: Copy>(
+    tx: &mpsc::Sender<Vec<f32>>,
+    data: &[T],
+    channels: usize,
+    to_f32: impl Fn(T) -> f32,
+) {
     if channels == 0 {
         return;
     }

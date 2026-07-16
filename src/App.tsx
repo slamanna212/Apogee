@@ -6,7 +6,7 @@ import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { currentMonitor, primaryMonitor } from '@tauri-apps/api/window';
 import { PhysicalPosition } from '@tauri-apps/api/dpi';
 import { IconApps, IconBell, IconHistory, IconHome2, IconMinus, IconSettings, IconSquare, IconStar, IconX } from '@tabler/icons-react';
-import { error as logError } from '@tauri-apps/plugin-log';
+import { error as logError, warn as logWarn } from '@tauri-apps/plugin-log';
 import { onAction, registerActionTypes } from '@tauri-apps/plugin-notification';
 import logoUrl from './assets/logo.svg';
 import { ALERT_ACTION_TYPE_ID, ALERT_GO_TO_ACTION_ID } from './lib/alertNotify';
@@ -17,6 +17,7 @@ import { usePlayerStore } from './stores/playerStore';
 import { useLibraryStore } from './stores/libraryStore';
 import { useUpdateStore } from './stores/updateStore';
 import { useAlertsStore } from './stores/alertsStore';
+import { useScrobblingStore } from './stores/scrobblingStore';
 import { setMediaMetadata } from './lib/mediaSession';
 import {
   discordRpcConnect,
@@ -34,6 +35,8 @@ import { Recent } from './pages/Recent';
 import { Favorites } from './pages/Favorites';
 import { Alerts } from './pages/Alerts';
 import { Settings } from './pages/Settings';
+import { asLastFmError, scrobbleLastFm, updateLastFmNowPlaying } from './lib/lastfm';
+import { ScrobbleCoordinator, type ScrobbleProviderClient } from './lib/scrobbling';
 
 type Page = 'home' | 'channels' | 'recent' | 'favorites' | 'alerts' | 'settings';
 
@@ -52,6 +55,19 @@ const CARD_HEIGHT = 760;
 const BAR_OVERLAP = 50;
 const EXPANDED_BAR_SIZE = { width: 900, height: 100 };
 const COLLAPSED_BAR_SIZE = { width: 340, height: 80 };
+
+const LASTFM_PROVIDER_CLIENT: ScrobbleProviderClient = {
+  id: 'lastfm',
+  updateNowPlaying: updateLastFmNowPlaying,
+  scrobble: scrobbleLastFm,
+  parseError: asLastFmError,
+  onAuthenticationInvalid(message) {
+    useScrobblingStore.getState().markLastFmDisconnected(message);
+  },
+  onPermanentFailure(message) {
+    void logWarn(message);
+  },
+};
 
 /**
  * One real OS window throughout. The "browser" is a rounded card absolutely
@@ -176,6 +192,9 @@ function AppContent() {
     initEventListener,
   } = usePlayerStore();
   const { loaded: libraryLoaded, load: loadLibrary, recordPlay, favorites, toggleFavorite } = useLibraryStore();
+  const lastFmConnection = useScrobblingStore((state) => state.providers.lastfm);
+  const scrobbleCoordinatorRef = useRef<ScrobbleCoordinator | null>(null);
+  if (!scrobbleCoordinatorRef.current) scrobbleCoordinatorRef.current = new ScrobbleCoordinator();
 
   const [browserOpen, setBrowserOpen] = useState(true);
   const [barMode, setBarMode] = useState<BarMode>('expanded');
@@ -205,9 +224,12 @@ function AppContent() {
     loadSettings();
     loadLibrary();
     void useAlertsStore.getState().load();
+    void useScrobblingStore.getState().load();
     initEventListener();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => () => scrobbleCoordinatorRef.current?.dispose(), []);
 
   useEffect(() => {
     void registerActionTypes([
@@ -284,6 +306,24 @@ function AppContent() {
   }, [nowPlaying]);
 
   const currentNowPlaying = currentChannel ? nowPlaying.get(currentChannel.stream_id) : undefined;
+
+  useEffect(() => {
+    const enabled = settings.scrobbling.lastfm.enabled && lastFmConnection.connected;
+    scrobbleCoordinatorRef.current?.update(
+      {
+        status: playerStatus,
+        channelId: currentChannel?.stream_id ?? null,
+        station: currentNowPlaying,
+      },
+      enabled ? [LASTFM_PROVIDER_CLIENT] : [],
+    );
+  }, [
+    playerStatus,
+    currentChannel,
+    currentNowPlaying,
+    settings.scrobbling.lastfm.enabled,
+    lastFmConnection.connected,
+  ]);
 
   useEffect(() => {
     if (!currentChannel) return;

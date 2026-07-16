@@ -4,6 +4,12 @@ import { getSecret, setSecret, getBuiltinStellarApiKey, SECRET_KEYS } from '../l
 
 export type UpdateChannel = 'stable' | 'beta';
 
+export interface ScrobblingSettings {
+  lastfm: {
+    enabled: boolean;
+  };
+}
+
 export interface Settings {
   baseUrl: string;
   username: string;
@@ -18,6 +24,7 @@ export interface Settings {
   onboardingStep: number;
   verboseLogging: boolean;
   discordRpcEnabled: boolean;
+  scrobbling: ScrobblingSettings;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -34,6 +41,7 @@ export const DEFAULT_SETTINGS: Settings = {
   onboardingStep: 0,
   verboseLogging: false,
   discordRpcEnabled: false,
+  scrobbling: { lastfm: { enabled: false } },
 };
 
 type PersistedSettings = Omit<Settings, 'password'>;

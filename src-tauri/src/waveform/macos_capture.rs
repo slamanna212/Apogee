@@ -2,15 +2,19 @@ use super::CaptureSource;
 use objc2::rc::Retained;
 use objc2::AllocAnyThread;
 use objc2_core_audio::{
-    kAudioAggregateDeviceIsPrivateKey, kAudioAggregateDeviceNameKey, kAudioAggregateDeviceTapAutoStartKey,
-    kAudioAggregateDeviceTapListKey, kAudioAggregateDeviceUIDKey, kAudioDevicePropertyNominalSampleRate,
+    kAudioAggregateDeviceIsPrivateKey, kAudioAggregateDeviceNameKey,
+    kAudioAggregateDeviceTapAutoStartKey, kAudioAggregateDeviceTapListKey,
+    kAudioAggregateDeviceUIDKey, kAudioDevicePropertyNominalSampleRate,
     kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal, kAudioSubTapUIDKey,
     AudioDeviceCreateIOProcID, AudioDeviceDestroyIOProcID, AudioDeviceIOProc, AudioDeviceIOProcID,
-    AudioDeviceStart, AudioDeviceStop, AudioHardwareCreateAggregateDevice, AudioHardwareCreateProcessTap,
-    AudioHardwareDestroyAggregateDevice, AudioHardwareDestroyProcessTap, AudioObjectGetPropertyData, AudioObjectID,
+    AudioDeviceStart, AudioDeviceStop, AudioHardwareCreateAggregateDevice,
+    AudioHardwareCreateProcessTap, AudioHardwareDestroyAggregateDevice,
+    AudioHardwareDestroyProcessTap, AudioObjectGetPropertyData, AudioObjectID,
     AudioObjectPropertyAddress, CATapDescription,
 };
-use objc2_core_foundation::{CFArray, CFBoolean, CFMutableDictionary, CFRetained, CFString, CFType};
+use objc2_core_foundation::{
+    CFArray, CFBoolean, CFMutableDictionary, CFRetained, CFString, CFType,
+};
 use objc2_foundation::{NSArray, NSNumber, NSString};
 use std::ffi::c_void;
 use std::io::{self, ErrorKind};
@@ -35,7 +39,13 @@ fn macos_os_version() -> Option<(u32, u32)> {
     let mut buf = [0u8; 32];
     let mut len = buf.len();
     let ret = unsafe {
-        libc::sysctlbyname(name.as_ptr(), buf.as_mut_ptr() as *mut c_void, &mut len, std::ptr::null_mut(), 0)
+        libc::sysctlbyname(
+            name.as_ptr(),
+            buf.as_mut_ptr() as *mut c_void,
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
     };
     if ret != 0 {
         return None;
@@ -59,35 +69,53 @@ fn build_tap_description() -> Retained<CATapDescription> {
 
 fn create_process_tap(desc: &CATapDescription) -> io::Result<AudioObjectID> {
     let mut tap_id: AudioObjectID = 0;
-    let status = unsafe { AudioHardwareCreateProcessTap(Some(desc), &mut tap_id as *mut AudioObjectID) };
+    let status =
+        unsafe { AudioHardwareCreateProcessTap(Some(desc), &mut tap_id as *mut AudioObjectID) };
     if status != 0 {
-        return Err(io::Error::other(format!("AudioHardwareCreateProcessTap failed: {status}")));
+        return Err(io::Error::other(format!(
+            "AudioHardwareCreateProcessTap failed: {status}"
+        )));
     }
     Ok(tap_id)
 }
 
 fn cf_key(key: &std::ffi::CStr) -> CFRetained<CFString> {
-    CFString::from_str(key.to_str().expect("CoreAudio property keys are always valid UTF-8"))
+    CFString::from_str(
+        key.to_str()
+            .expect("CoreAudio property keys are always valid UTF-8"),
+    )
 }
 
 /// Wraps the process tap as the sole input of a private aggregate device -
 /// installing an IOProc directly on a bare tap isn't supported, so every
 /// Core Audio tap consumer (Apple's own AudioCap sample, the `audiotee`
 /// CLI) goes through this aggregate-device indirection.
-fn create_aggregate_device(tap_uid: &NSString, agg_uid: &str, name: &str) -> io::Result<AudioObjectID> {
-    let sub_tap_dict: CFRetained<CFMutableDictionary<CFString, CFType>> = CFMutableDictionary::empty();
+fn create_aggregate_device(
+    tap_uid: &NSString,
+    agg_uid: &str,
+    name: &str,
+) -> io::Result<AudioObjectID> {
+    let sub_tap_dict: CFRetained<CFMutableDictionary<CFString, CFType>> =
+        CFMutableDictionary::empty();
     let tap_uid_cf = CFString::from_str(&tap_uid.to_string());
     sub_tap_dict.set(&cf_key(kAudioSubTapUIDKey), tap_uid_cf.as_ref());
 
-    let composition: CFRetained<CFMutableDictionary<CFString, CFType>> = CFMutableDictionary::empty();
+    let composition: CFRetained<CFMutableDictionary<CFString, CFType>> =
+        CFMutableDictionary::empty();
     let name_cf = CFString::from_str(name);
     let uid_cf = CFString::from_str(agg_uid);
     let tap_list = CFArray::from_retained_objects(&[sub_tap_dict]);
     composition.set(&cf_key(kAudioAggregateDeviceNameKey), name_cf.as_ref());
     composition.set(&cf_key(kAudioAggregateDeviceUIDKey), uid_cf.as_ref());
     composition.set(&cf_key(kAudioAggregateDeviceTapListKey), tap_list.as_ref());
-    composition.set(&cf_key(kAudioAggregateDeviceIsPrivateKey), CFBoolean::new(true).as_ref());
-    composition.set(&cf_key(kAudioAggregateDeviceTapAutoStartKey), CFBoolean::new(true).as_ref());
+    composition.set(
+        &cf_key(kAudioAggregateDeviceIsPrivateKey),
+        CFBoolean::new(true).as_ref(),
+    );
+    composition.set(
+        &cf_key(kAudioAggregateDeviceTapAutoStartKey),
+        CFBoolean::new(true).as_ref(),
+    );
 
     // `AudioHardwareCreateAggregateDevice` takes a type-erased `CFDictionary`
     // (its `K`/`V` are `Opaque`, which can't satisfy the `Type + PartialEq +
@@ -97,9 +125,13 @@ fn create_aggregate_device(tap_uid: &NSString, agg_uid: &str, name: &str) -> io:
     let composition: CFRetained<objc2_core_foundation::CFDictionary> =
         unsafe { CFRetained::cast_unchecked(composition) };
     let mut device_id: AudioObjectID = 0;
-    let status = unsafe { AudioHardwareCreateAggregateDevice(composition.as_ref(), NonNull::from(&mut device_id)) };
+    let status = unsafe {
+        AudioHardwareCreateAggregateDevice(composition.as_ref(), NonNull::from(&mut device_id))
+    };
     if status != 0 {
-        return Err(io::Error::other(format!("AudioHardwareCreateAggregateDevice failed: {status}")));
+        return Err(io::Error::other(format!(
+            "AudioHardwareCreateAggregateDevice failed: {status}"
+        )));
     }
     Ok(device_id)
 }
@@ -123,7 +155,9 @@ fn nominal_sample_rate(device_id: AudioObjectID) -> io::Result<u32> {
         )
     };
     if status != 0 || rate <= 0.0 {
-        return Err(io::Error::other(format!("failed to read aggregate device sample rate: status {status}")));
+        return Err(io::Error::other(format!(
+            "failed to read aggregate device sample rate: status {status}"
+        )));
     }
     Ok(rate.round() as u32)
 }
@@ -152,8 +186,10 @@ unsafe extern "C-unwind" fn io_proc(
         return 0;
     }
     let samples = unsafe { std::slice::from_raw_parts(buffer.mData as *const f32, sample_count) };
-    let mono: Vec<f32> =
-        samples.chunks_exact(channels).map(|frame| frame.iter().sum::<f32>() / channels as f32).collect();
+    let mono: Vec<f32> = samples
+        .chunks_exact(channels)
+        .map(|frame| frame.iter().sum::<f32>() / channels as f32)
+        .collect();
     let _ = tx.blocking_send(mono);
     0
 }
@@ -169,7 +205,9 @@ fn teardown(handles: TeardownHandles) {
     unsafe {
         let _ = AudioDeviceStop(handles.device_id, handles.proc_id);
         let _ = AudioDeviceDestroyIOProcID(handles.device_id, handles.proc_id);
-        drop(Box::from_raw(handles.client_data as *mut mpsc::Sender<Vec<f32>>));
+        drop(Box::from_raw(
+            handles.client_data as *mut mpsc::Sender<Vec<f32>>,
+        ));
         let _ = AudioHardwareDestroyAggregateDevice(handles.device_id);
         let _ = AudioHardwareDestroyProcessTap(handles.tap_id);
     }
@@ -201,7 +239,11 @@ pub(super) async fn open_macos_capture_source() -> io::Result<CaptureSource> {
             }
         };
         let tap_uid = unsafe { desc.UUID() }.UUIDString();
-        let device_id = match create_aggregate_device(&tap_uid, "com.apogee.waveform-tap", "Apogee Waveform Tap") {
+        let device_id = match create_aggregate_device(
+            &tap_uid,
+            "com.apogee.waveform-tap",
+            "Apogee Waveform Tap",
+        ) {
             Ok(id) => id,
             Err(e) => {
                 unsafe {
@@ -226,8 +268,9 @@ pub(super) async fn open_macos_capture_source() -> io::Result<CaptureSource> {
         let client_data = Box::into_raw(Box::new(tx)) as *mut c_void;
         let mut proc_id: AudioDeviceIOProcID = None;
         let cb: AudioDeviceIOProc = Some(io_proc);
-        let create_status =
-            unsafe { AudioDeviceCreateIOProcID(device_id, cb, client_data, NonNull::from(&mut proc_id)) };
+        let create_status = unsafe {
+            AudioDeviceCreateIOProcID(device_id, cb, client_data, NonNull::from(&mut proc_id))
+        };
         if create_status != 0 {
             unsafe {
                 drop(Box::from_raw(client_data as *mut mpsc::Sender<Vec<f32>>));
@@ -248,7 +291,9 @@ pub(super) async fn open_macos_capture_source() -> io::Result<CaptureSource> {
                 let _ = AudioHardwareDestroyAggregateDevice(device_id);
                 let _ = AudioHardwareDestroyProcessTap(tap_id);
             }
-            let _ = ready_tx.send(Err(io::Error::other(format!("AudioDeviceStart failed: {start_status}"))));
+            let _ = ready_tx.send(Err(io::Error::other(format!(
+                "AudioDeviceStart failed: {start_status}"
+            ))));
             return;
         }
 
@@ -264,10 +309,21 @@ pub(super) async fn open_macos_capture_source() -> io::Result<CaptureSource> {
         while !stop.load(Ordering::SeqCst) {
             std::thread::park_timeout(Duration::from_millis(250));
         }
-        teardown(TeardownHandles { tap_id, device_id, proc_id, client_data });
+        teardown(TeardownHandles {
+            tap_id,
+            device_id,
+            proc_id,
+            client_data,
+        });
     });
 
-    let sample_rate = ready_rx.recv().map_err(|_| io::Error::other("Core Audio tap thread ended before starting"))??;
+    let sample_rate = ready_rx
+        .recv()
+        .map_err(|_| io::Error::other("Core Audio tap thread ended before starting"))??;
 
-    Ok(CaptureSource { rx, sample_rate, backend_name: "Core Audio process tap" })
+    Ok(CaptureSource {
+        rx,
+        sample_rate,
+        backend_name: "Core Audio process tap",
+    })
 }

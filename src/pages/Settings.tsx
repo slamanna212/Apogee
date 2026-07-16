@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Group, PasswordInput, Select, Slider, Switch, Text, TextInput } from '@mantine/core';
+import { Alert, Badge, Button, Group, Paper, PasswordInput, Select, Slider, Stack, Switch, Text, TextInput } from '@mantine/core';
+import { IconBrandLastfm } from '@tabler/icons-react';
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
@@ -7,6 +8,7 @@ import { useSettingsStore, type UpdateChannel } from '../stores/settingsStore';
 import { useLibraryStore, type ThemeMode } from '../stores/libraryStore';
 import { useUpdateStore } from '../stores/updateStore';
 import { useAlertsStore } from '../stores/alertsStore';
+import { useScrobblingStore } from '../stores/scrobblingStore';
 import { getLiveCategories } from '../lib/xtream';
 import type { XtreamCategory } from '../types/xtream';
 import logoUrl from '../assets/logo.svg';
@@ -33,6 +35,38 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   );
 }
 
+function ProviderSettings({
+  name,
+  connected,
+  username,
+  children,
+}: {
+  name: string;
+  connected: boolean;
+  username: string | null;
+  children: React.ReactNode;
+}) {
+  return (
+    <Paper p="md" radius="md" withBorder style={{ background: 'var(--app-panel)' }}>
+      <Stack gap="sm">
+        <Group justify="space-between" align="center">
+          <Group gap="sm">
+            <IconBrandLastfm size={28} color="#d51007" />
+            <div>
+              <Text fw={600}>{name}</Text>
+              {username && <Text size="xs" c="dimmed">Connected as {username}</Text>}
+            </div>
+          </Group>
+          <Badge color={connected ? 'teal' : 'gray'} variant="light">
+            {connected ? 'Connected' : 'Not connected'}
+          </Badge>
+        </Group>
+        {children}
+      </Stack>
+    </Paper>
+  );
+}
+
 export function Settings() {
   const settings = useSettingsStore((s) => s.settings);
   const settingsLoaded = useSettingsStore((s) => s.loaded);
@@ -43,6 +77,11 @@ export function Settings() {
   const notifyInApp = useAlertsStore((s) => s.notifyInApp);
   const setNotifyOS = useAlertsStore((s) => s.setNotifyOS);
   const setNotifyInApp = useAlertsStore((s) => s.setNotifyInApp);
+  const lastFm = useScrobblingStore((s) => s.providers.lastfm);
+  const pendingLastFmToken = useScrobblingStore((s) => s.pendingLastFmToken);
+  const beginLastFmConnection = useScrobblingStore((s) => s.beginLastFmConnection);
+  const finishLastFmConnection = useScrobblingStore((s) => s.finishLastFmConnection);
+  const disconnectLastFm = useScrobblingStore((s) => s.disconnectLastFm);
 
   const [baseUrl, setBaseUrl] = useState(settings.baseUrl);
   const [username, setUsername] = useState(settings.username);
@@ -212,6 +251,61 @@ export function Settings() {
             checked={settings.discordRpcEnabled}
             onChange={(e) => updateSettings({ discordRpcEnabled: e.currentTarget.checked })}
           />
+        </Card>
+
+        <Card title="Scrobbling">
+          <Text size="sm" c="dimmed">
+            Share the songs you listen to with connected music services. Only items identified as songs are submitted.
+          </Text>
+          <ProviderSettings name="Last.fm" connected={lastFm.connected} username={lastFm.username}>
+            {!lastFm.available && lastFm.status !== 'loading' ? (
+              <Alert color="yellow" title="Unavailable in this build">
+                Last.fm credentials were not configured when this version of Apogee was built.
+              </Alert>
+            ) : lastFm.connected ? (
+              <>
+                <Switch
+                  label="Scrobble to Last.fm"
+                  description="Shows now playing immediately and scrobbles after 25 seconds of listening"
+                  checked={settings.scrobbling.lastfm.enabled}
+                  onChange={(event) => updateSettings({
+                    scrobbling: { lastfm: { enabled: event.currentTarget.checked } },
+                  })}
+                />
+                <Group justify="flex-end">
+                  <Button
+                    variant="subtle"
+                    color="red"
+                    onClick={() => {
+                      void updateSettings({ scrobbling: { lastfm: { enabled: false } } });
+                      void disconnectLastFm();
+                    }}
+                  >
+                    Disconnect
+                  </Button>
+                </Group>
+              </>
+            ) : pendingLastFmToken ? (
+              <>
+                <Text size="sm" c="dimmed">
+                  Approve Apogee in the browser, then finish the connection here.
+                </Text>
+                <Group>
+                  <Button onClick={() => void finishLastFmConnection()} loading={lastFm.status === 'loading'}>
+                    Finish connection
+                  </Button>
+                  <Button variant="default" onClick={() => void beginLastFmConnection()} disabled={lastFm.status === 'loading'}>
+                    Restart authorization
+                  </Button>
+                </Group>
+              </>
+            ) : (
+              <Button onClick={() => void beginLastFmConnection()} loading={lastFm.status === 'loading'} style={{ alignSelf: 'flex-start' }}>
+                Connect Last.fm
+              </Button>
+            )}
+            {lastFm.error && <Alert color="red">{lastFm.error}</Alert>}
+          </ProviderSettings>
         </Card>
 
         <Card title="Alerts">

@@ -8,12 +8,12 @@ use url::Url;
 #[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Metadata {
-  rid: ResourceId,
-  current_version: String,
-  version: String,
-  date: Option<String>,
-  body: Option<String>,
-  raw_json: serde_json::Value,
+    rid: ResourceId,
+    current_version: String,
+    version: String,
+    date: Option<String>,
+    body: Option<String>,
+    raw_json: serde_json::Value,
 }
 
 /// Checks a single, explicitly-provided `latest.json` URL rather than the
@@ -23,44 +23,43 @@ pub struct Metadata {
 /// verification / download / install machinery via the returned resource id.
 #[tauri::command]
 pub async fn check_update_at_endpoint<R: Runtime>(
-  webview: Webview<R>,
-  url: String,
+    webview: Webview<R>,
+    url: String,
 ) -> Result<Option<Metadata>, String> {
-  let endpoint = Url::parse(&url).map_err(|e| e.to_string())?;
+    let endpoint = Url::parse(&url).map_err(|e| e.to_string())?;
 
-  let updater = webview
-    .updater_builder()
-    .endpoints(vec![endpoint])
-    .map_err(|e| e.to_string())?
-    .build()
-    .map_err(|e| e.to_string())?;
+    let updater = webview
+        .updater_builder()
+        .endpoints(vec![endpoint])
+        .map_err(|e| e.to_string())?
+        .build()
+        .map_err(|e| e.to_string())?;
 
-  let update = updater.check().await.map_err(|e| e.to_string())?;
+    let update = updater.check().await.map_err(|e| e.to_string())?;
 
-  let Some(update) = update else {
-    return Ok(None);
-  };
+    let Some(update) = update else {
+        return Ok(None);
+    };
 
-  let formatted_date = if let Some(date) = update.date {
-    Some(
-      date
-        .format(&time::format_description::well_known::Rfc3339)
-        .map_err(|e| e.to_string())?,
-    )
-  } else {
-    None
-  };
+    let formatted_date = if let Some(date) = update.date {
+        Some(
+            date.format(&time::format_description::well_known::Rfc3339)
+                .map_err(|e| e.to_string())?,
+        )
+    } else {
+        None
+    };
 
-  let metadata = Metadata {
-    current_version: update.current_version.clone(),
-    version: update.version.clone(),
-    date: formatted_date,
-    body: update.body.clone(),
-    raw_json: update.raw_json.clone(),
-    rid: webview.resources_table().add(update),
-  };
+    let metadata = Metadata {
+        current_version: update.current_version.clone(),
+        version: update.version.clone(),
+        date: formatted_date,
+        body: update.body.clone(),
+        raw_json: update.raw_json.clone(),
+        rid: webview.resources_table().add(update),
+    };
 
-  Ok(Some(metadata))
+    Ok(Some(metadata))
 }
 
 /// Mirrors `tauri_plugin_updater::DownloadEvent`'s wire shape exactly (that
@@ -71,9 +70,9 @@ pub async fn check_update_at_endpoint<R: Runtime>(
 #[derive(Serialize, Clone)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 pub enum DownloadEvent {
-  Started { content_length: Option<u64> },
-  Progress { chunk_length: usize },
-  Finished,
+    Started { content_length: Option<u64> },
+    Progress { chunk_length: usize },
+    Finished,
 }
 
 /// Downloads the update identified by `rid` (obtained from
@@ -92,46 +91,46 @@ pub enum DownloadEvent {
 /// for the fix.
 #[tauri::command]
 pub async fn download_and_install_update<R: Runtime>(
-  app_handle: tauri::AppHandle<R>,
-  webview: Webview<R>,
-  rid: ResourceId,
-  on_event: Channel<DownloadEvent>,
+    app_handle: tauri::AppHandle<R>,
+    webview: Webview<R>,
+    rid: ResourceId,
+    on_event: Channel<DownloadEvent>,
 ) -> Result<(), String> {
-  let update = webview
-    .resources_table()
-    .get::<tauri_plugin_updater::Update>(rid)
-    .map_err(|e| e.to_string())?;
+    let update = webview
+        .resources_table()
+        .get::<tauri_plugin_updater::Update>(rid)
+        .map_err(|e| e.to_string())?;
 
-  // Mirrors the plugin's own `commands::download` exactly: the crate's
-  // `Update::download` calls `on_chunk` for every chunk (not just the
-  // first), so `Started` has to be synthesized here on the first call.
-  let mut first_chunk = true;
-  let bytes = update
-    .download(
-      |chunk_length, content_length| {
-        if first_chunk {
-          first_chunk = false;
-          let _ = on_event.send(DownloadEvent::Started { content_length });
-        }
-        let _ = on_event.send(DownloadEvent::Progress { chunk_length });
-      },
-      || {
-        let _ = on_event.send(DownloadEvent::Finished);
-      },
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    // Mirrors the plugin's own `commands::download` exactly: the crate's
+    // `Update::download` calls `on_chunk` for every chunk (not just the
+    // first), so `Started` has to be synthesized here on the first call.
+    let mut first_chunk = true;
+    let bytes = update
+        .download(
+            |chunk_length, content_length| {
+                if first_chunk {
+                    first_chunk = false;
+                    let _ = on_event.send(DownloadEvent::Started { content_length });
+                }
+                let _ = on_event.send(DownloadEvent::Progress { chunk_length });
+            },
+            || {
+                let _ = on_event.send(DownloadEvent::Finished);
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())?;
 
-  #[cfg(windows)]
-  {
-    let version = update.version.clone();
-    install_windows(&app_handle, &version, &bytes)
-  }
-  #[cfg(not(windows))]
-  {
-    let _ = app_handle;
-    update.install(bytes).map_err(|e| e.to_string())
-  }
+    #[cfg(windows)]
+    {
+        let version = update.version.clone();
+        install_windows(&app_handle, &version, &bytes)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app_handle;
+        update.install(bytes).map_err(|e| e.to_string())
+    }
 }
 
 /// Writes the downloaded installer to a temp file and launches it directly
@@ -150,41 +149,41 @@ pub async fn download_and_install_update<R: Runtime>(
 /// error instead of the app silently vanishing.
 #[cfg(windows)]
 fn install_windows<R: Runtime>(
-  app_handle: &tauri::AppHandle<R>,
-  version: &str,
-  bytes: &[u8],
+    app_handle: &tauri::AppHandle<R>,
+    version: &str,
+    bytes: &[u8],
 ) -> Result<(), String> {
-  use std::os::windows::process::CommandExt;
+    use std::os::windows::process::CommandExt;
 
-  const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
 
-  let temp_dir = std::env::temp_dir().join(format!("apogee-updater-{version}"));
-  std::fs::create_dir_all(&temp_dir)
-    .map_err(|e| format!("couldn't create temp dir for the update installer: {e}"))?;
-  let installer_path = temp_dir.join(format!("Apogee_{version}_x64-setup.exe"));
-  std::fs::write(&installer_path, bytes)
-    .map_err(|e| format!("couldn't write the update installer to disk: {e}"))?;
+    let temp_dir = std::env::temp_dir().join(format!("apogee-updater-{version}"));
+    std::fs::create_dir_all(&temp_dir)
+        .map_err(|e| format!("couldn't create temp dir for the update installer: {e}"))?;
+    let installer_path = temp_dir.join(format!("Apogee_{version}_x64-setup.exe"));
+    std::fs::write(&installer_path, bytes)
+        .map_err(|e| format!("couldn't write the update installer to disk: {e}"))?;
 
-  log::info!("launching update installer at {installer_path:?}");
+    log::info!("launching update installer at {installer_path:?}");
 
-  match std::process::Command::new(&installer_path)
-    .args(["/P", "/R", "/UPDATE"])
-    .creation_flags(CREATE_BREAKAWAY_FROM_JOB)
-    .spawn()
-  {
-    Ok(child) => {
-      log::info!("update installer launched (pid {})", child.id());
-      mpv::kill_blocking(&app_handle.state::<MpvState>());
-      app_handle.cleanup_before_exit();
-      app_handle.exit(0);
-      Ok(())
-    }
-    Err(e) => {
-      log::error!("failed to launch update installer: {e}");
-      let _ = std::fs::remove_file(&installer_path);
-      Err(format!(
+    match std::process::Command::new(&installer_path)
+        .args(["/P", "/R", "/UPDATE"])
+        .creation_flags(CREATE_BREAKAWAY_FROM_JOB)
+        .spawn()
+    {
+        Ok(child) => {
+            log::info!("update installer launched (pid {})", child.id());
+            mpv::kill_blocking(&app_handle.state::<MpvState>());
+            app_handle.cleanup_before_exit();
+            app_handle.exit(0);
+            Ok(())
+        }
+        Err(e) => {
+            log::error!("failed to launch update installer: {e}");
+            let _ = std::fs::remove_file(&installer_path);
+            Err(format!(
         "Couldn't start the installer ({e}). Try downloading it manually from the GitHub releases page."
       ))
+        }
     }
-  }
 }
