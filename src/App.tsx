@@ -142,6 +142,10 @@ async function applyWindowState(
   await win.setAlwaysOnTop(target.alwaysOnTop);
 }
 
+// macOS convention puts window controls at the left of the titlebar
+// (traffic lights); Windows/Linux put them at the right.
+const isMac = navigator.userAgent.includes('Mac');
+
 const titlebarBtnStyle: CSSProperties = {
   width: 44,
   height: 36,
@@ -516,19 +520,48 @@ function AppContent() {
         >
           <div
             data-tauri-drag-region
-            style={{ height: 36, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 'none' }}
+            style={{
+              height: 36,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flex: 'none',
+              flexDirection: isMac ? 'row-reverse' : 'row',
+            }}
           >
-            <img src={logoUrl} alt="" width={18} height={18} style={{ marginLeft: 12 }} />
+            <img
+              src={logoUrl}
+              alt=""
+              width={18}
+              height={18}
+              style={{ marginLeft: isMac ? 0 : 12, marginRight: isMac ? 12 : 0 }}
+            />
             <div style={{ display: 'flex' }}>
-              <TitlebarButton label="Minimize" onClick={() => win.minimize()}>
-                <IconMinus size={14} />
-              </TitlebarButton>
-              <TitlebarButton label="Maximize" onClick={() => win.toggleMaximize()}>
-                <IconSquare size={12} />
-              </TitlebarButton>
-              <TitlebarButton label="Quit" onClick={() => win.close()}>
-                <IconX size={14} />
-              </TitlebarButton>
+              {isMac ? (
+                <>
+                  <TitlebarButton label="Quit" onClick={() => win.close()}>
+                    <IconX size={14} />
+                  </TitlebarButton>
+                  <TitlebarButton label="Minimize" onClick={() => win.minimize()}>
+                    <IconMinus size={14} />
+                  </TitlebarButton>
+                  <TitlebarButton label="Maximize" onClick={() => win.toggleMaximize()}>
+                    <IconSquare size={12} />
+                  </TitlebarButton>
+                </>
+              ) : (
+                <>
+                  <TitlebarButton label="Minimize" onClick={() => win.minimize()}>
+                    <IconMinus size={14} />
+                  </TitlebarButton>
+                  <TitlebarButton label="Maximize" onClick={() => win.toggleMaximize()}>
+                    <IconSquare size={12} />
+                  </TitlebarButton>
+                  <TitlebarButton label="Quit" onClick={() => win.close()}>
+                    <IconX size={14} />
+                  </TitlebarButton>
+                </>
+              )}
             </div>
           </div>
 
