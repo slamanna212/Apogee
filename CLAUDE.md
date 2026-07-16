@@ -45,5 +45,5 @@ Settings (Xtream base URL/credentials + category; an optional StellarTunerLog AP
 
 ### Backend quirks (see `docs/milestone-0-findings.md`)
 
-- The live Xtream backend this was built against serves raw MPEG-TS for both `.ts` and `.m3u8` requests (no real HLS) — `streamExtension` is a user setting, default `.ts`, and per-provider behavior shouldn't be assumed.
+- The live Xtream backend this was built against serves raw MPEG-TS for both `.ts` and `.m3u8` requests (no real HLS). Since per-provider behavior can't be assumed, `playerStore` tries `.ts` first and automatically alternates to `.m3u8` within its bounded connect-retry loop (`MAX_CONNECT_ATTEMPTS`) rather than exposing a manual setting.
 - Initial connection to a given `stream_id` occasionally times out on the first attempt (upstream channel spin-up); this is a known transient condition, not a hard failure.

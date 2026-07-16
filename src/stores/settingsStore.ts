@@ -14,7 +14,6 @@ export interface Settings {
   baseUrl: string;
   username: string;
   password: string;
-  streamExtension: string;
   categoryId: string | null;
   categoryName: string | null;
   volume: number;
@@ -32,7 +31,6 @@ export const DEFAULT_SETTINGS: Settings = {
   baseUrl: '',
   username: '',
   password: '',
-  streamExtension: '.ts',
   categoryId: null,
   categoryName: null,
   volume: 80,

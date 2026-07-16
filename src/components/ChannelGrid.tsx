@@ -50,8 +50,13 @@ export function ChannelGrid({
   const filtered = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     if (!q) return channels;
-    return channels.filter((c) => (channelMetadata.get(c.stream_id)?.marketing_name || c.name).toLowerCase().includes(q));
-  }, [channels, channelMetadata, searchTerm]);
+    return channels.filter((c) => {
+      const name = (channelMetadata.get(c.stream_id)?.marketing_name || c.name).toLowerCase();
+      if (name.includes(q)) return true;
+      const station = nowPlaying?.get(c.stream_id);
+      return !!station && (station.title.toLowerCase().includes(q) || station.artist.toLowerCase().includes(q));
+    });
+  }, [channels, channelMetadata, searchTerm, nowPlaying]);
 
   const sorted = useMemo(() => {
     if (!sortable) return filtered;
@@ -101,7 +106,7 @@ export function ChannelGrid({
             <input
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search channels"
+              placeholder="Search channels, songs, artists"
               style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--app-text)', font: '400 12px "Sora", sans-serif', width: '100%' }}
             />
             {searchTerm && (

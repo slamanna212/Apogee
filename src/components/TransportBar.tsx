@@ -44,8 +44,9 @@ function PlusMinus({
   compact?: boolean;
 }) {
   const size = compact ? 22 : 32;
+  const boxWidth = compact ? 19 : 26;
   const btnStyle = {
-    width: size,
+    width: boxWidth,
     height: size,
     display: 'flex',
     alignItems: 'center',
@@ -59,7 +60,15 @@ function PlusMinus({
     userSelect: 'none' as const,
   };
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 0, flex: 'none' }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 0,
+        flex: 'none',
+        marginRight: compact ? -3 : -6,
+      }}
+    >
       <div style={btnStyle} onClick={onPlus} role="button" aria-label="Open browser">
         +
       </div>
@@ -383,7 +392,6 @@ function BarContent({
   channelMetadata,
   nowPlaying,
   errorMessage,
-  isBuffering,
   onArtworkClick,
 }: {
   status: PlayerStatus;
@@ -391,13 +399,12 @@ function BarContent({
   channelMetadata?: StellarChannel;
   nowPlaying?: StellarStation;
   errorMessage?: string | null;
-  isBuffering?: boolean;
   onArtworkClick?: (artworkUrl: string) => void;
 }) {
   if (!currentChannel) {
     return (
       <>
-        <div style={{ width: 56, height: 56, borderRadius: 14, background: 'var(--app-panel2)', flex: 'none' }} />
+        <div style={{ width: 65, height: 65, borderRadius: 5, background: 'var(--app-panel2)', flex: 'none' }} />
         <Text data-tauri-drag-region size="sm" c="dimmed" style={{ flex: '1 1 auto', minWidth: 0 }}>
           Select a channel to start listening
         </Text>
@@ -412,10 +419,10 @@ function BarContent({
           <img
             src={currentChannel.stream_icon}
             alt=""
-            style={{ width: 56, height: 56, borderRadius: 14, objectFit: 'cover', flex: 'none', background: 'var(--app-panel2)' }}
+            style={{ width: 65, height: 65, borderRadius: 5, objectFit: 'cover', flex: 'none', background: 'var(--app-panel2)' }}
           />
         ) : (
-          <div style={{ width: 56, height: 56, borderRadius: 14, background: 'var(--app-panel2)', flex: 'none' }} />
+          <div style={{ width: 65, height: 65, borderRadius: 5, background: 'var(--app-panel2)', flex: 'none' }} />
         )}
         <div data-tauri-drag-region style={{ flex: '1 1 auto', minWidth: 0 }}>
           <div
@@ -452,9 +459,9 @@ function BarContent({
       <>
         <div
           style={{
-            width: 56,
-            height: 56,
-            borderRadius: 14,
+            width: 65,
+            height: 65,
+            borderRadius: 5,
             background: 'rgba(250,82,82,.12)',
             display: 'flex',
             alignItems: 'center',
@@ -484,8 +491,8 @@ function BarContent({
         streamIcon={currentChannel.stream_icon}
         metadata={channelMetadata}
         artworkUrl={artwork}
-        size={56}
-        radius={14}
+        size={65}
+        radius={5}
         onClick={onArtworkClick && artwork ? () => onArtworkClick(artwork) : undefined}
       />
       <div data-tauri-drag-region style={{ flex: '1 1 auto', minWidth: 0 }}>
@@ -533,13 +540,6 @@ function BarContent({
           </div>
         )}
       </div>
-      <CutTypeBadge cutType={nowPlaying?.cut_type} />
-      {isBuffering && status === 'playing' && (
-        <Text size="xs" c="orange" style={{ flex: 'none' }} title="Buffering">
-          ● Buffering
-        </Text>
-      )}
-      <Waveform active={status === 'playing'} />
     </>
   );
 }
@@ -706,20 +706,32 @@ export function TransportBar({
           channelMetadata={channelMetadata}
           nowPlaying={nowPlaying}
           errorMessage={errorMessage}
-          isBuffering={isBuffering}
           onArtworkClick={isMiniPlayer ? undefined : setExpandedArtwork}
         />
-        <VolumeControl volume={volume} onChange={onVolumeChange} compact={compactVolumePopover} muted={muted} onToggleMute={onToggleMute} />
-        {currentChannel && (
-          <ChannelActionsMenu
-            nowPlaying={nowPlaying}
-            isFavorite={!!isFavorite}
-            onToggleFavorite={onToggleFavorite ?? (() => {})}
-            triggerStyle={{ ...dotsButtonStyle, color: isFavorite ? 'var(--app-accent)' : 'var(--app-text)' }}
-            position="top-end"
-            layout={isMiniPlayer ? 'horizontal' : 'vertical'}
-          />
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 'none' }}>
+          {currentChannel && status !== 'loading' && status !== 'error' && (
+            <>
+              <CutTypeBadge cutType={nowPlaying?.cut_type} />
+              {isBuffering && status === 'playing' && (
+                <Text size="xs" c="orange" style={{ flex: 'none' }} title="Buffering">
+                  ● Buffering
+                </Text>
+              )}
+              <Waveform active={status === 'playing'} />
+            </>
+          )}
+          <VolumeControl volume={volume} onChange={onVolumeChange} compact={compactVolumePopover} muted={muted} onToggleMute={onToggleMute} />
+          {currentChannel && (
+            <ChannelActionsMenu
+              nowPlaying={nowPlaying}
+              isFavorite={!!isFavorite}
+              onToggleFavorite={onToggleFavorite ?? (() => {})}
+              triggerStyle={{ ...dotsButtonStyle, color: isFavorite ? 'var(--app-accent)' : 'var(--app-text)' }}
+              position="top-end"
+              layout={isMiniPlayer ? 'horizontal' : 'vertical'}
+            />
+          )}
+        </div>
       </div>
     </>
   );

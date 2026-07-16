@@ -117,8 +117,8 @@ function ChannelListRowImpl({
         streamIcon={channel.stream_icon}
         metadata={metadata}
         artworkUrl={artworkUrl}
-        size={68}
-        radius={16}
+        size={80}
+        radius={5}
       />
       <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
         <div style={{ minWidth: 0, maxWidth: 320, flex: 'none' }}>

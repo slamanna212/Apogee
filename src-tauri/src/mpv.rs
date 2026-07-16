@@ -314,12 +314,13 @@ async fn connect_ipc(path: &str) -> std::io::Result<Box<dyn AsyncReadWrite>> {
     ))
 }
 
-fn spawn_mpv(mpv_path: &str) -> std::io::Result<Child> {
+fn spawn_mpv(mpv_path: &str, user_agent: &str) -> std::io::Result<Child> {
     let mut cmd = Command::new(mpv_path);
     cmd.args([
         "--no-video",
         "--idle=yes",
         &format!("--input-ipc-server={}", ipc_path()),
+        &format!("--user-agent={user_agent}"),
     ])
     .stdout(Stdio::null())
     .stderr(Stdio::piped())
@@ -385,7 +386,15 @@ async fn ensure_started(app: &AppHandle, state: &MpvState) -> Result<(), String>
     state.stderr_tail.lock().await.clear();
 
     let mpv_path = resolve_mpv_path(app);
-    let mut child = spawn_mpv(&mpv_path).map_err(|e| {
+    let version = app.package_info().version.to_string();
+    let os_label = match std::env::consts::OS {
+        "windows" => "Windows",
+        "macos" => "macOS",
+        "linux" => "Linux",
+        other => other,
+    };
+    let user_agent = format!("Apogee/{version} ({os_label})");
+    let mut child = spawn_mpv(&mpv_path, &user_agent).map_err(|e| {
         let message = if e.kind() == std::io::ErrorKind::NotFound {
             "mpv not found - install it (macOS: `brew install mpv`; Linux: install the `mpv` package) and restart Apogee".to_string()
         } else {

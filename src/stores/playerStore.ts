@@ -40,7 +40,6 @@ interface PlayerActions {
   selectChannel: (
     channel: XtreamChannel,
     creds: XtreamCredentials,
-    streamExtension: string,
   ) => Promise<void>;
   play: () => Promise<void>;
   stop: () => Promise<void>;
@@ -60,14 +59,30 @@ let volumePersistTimer: ReturnType<typeof setTimeout> | null = null;
 // Last connected stream URL, kept around so `play()` can reconnect after a
 // `stop()` without needing the channel to be reselected from the list.
 let lastStreamUrl: string | null = null;
+// Credentials for the channel currently being connected to, kept around so a
+// retry (which may switch stream extension - see extensionForAttempt) can
+// rebuild the URL without the caller needing to pass streamExtension around.
+let activeCreds: XtreamCredentials | null = null;
 
 // Some Xtream providers only spin the upstream channel up on first view, so
 // the very first connection attempt fails a couple seconds in and a retry
 // succeeds - see docs/milestone-0-findings.md. Retry a bounded number of
 // times before surfacing an error, rather than either hanging forever or
-// failing on the first (often transient) hiccup.
-const MAX_CONNECT_ATTEMPTS = 3;
+// failing on the first (often transient) hiccup. This budget also covers
+// alternating stream extension (see extensionForAttempt) since providers vary
+// in whether .ts or .m3u8 is the "right" one.
+const MAX_CONNECT_ATTEMPTS = 4;
 const RETRY_DELAY_MS = 1500;
+
+// Xtream providers vary in whether .ts or .m3u8 is the "right" extension for
+// live streams (see docs/milestone-0-findings.md) - alternate every attempt so
+// both get an initial try, then a second chance each, rather than exposing
+// this as a manual setting.
+const PRIMARY_EXTENSION = '.ts';
+const FALLBACK_EXTENSION = '.m3u8';
+function extensionForAttempt(attempt: number): string {
+  return attempt % 2 === 0 ? PRIMARY_EXTENSION : FALLBACK_EXTENSION;
+}
 // If mpv never reports 'playback-restart' or a definitive 'end-file' within
 // this window, treat the attempt as failed rather than leaving the UI stuck
 // on "Connecting..." indefinitely.
@@ -110,7 +125,11 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
     }, HEARTBEAT_INTERVAL_MS);
   }
 
-  async function connect(url: string, streamId: number) {
+  // Connects to a known URL as-is - no extension probing. Used for
+  // reconnecting to a URL that's already known to work (play() after stop(),
+  // or recovering from a mid-playback mpv crash), never for a fresh channel
+  // selection or a failed-attempt retry (see connectWithProbe for those).
+  async function connectToUrl(url: string, streamId: number) {
     stopFallbackPolling();
     stopConnectTimeout();
     stopHeartbeat();
@@ -127,7 +146,7 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
       // initEventListener), which fires only after buffering actually completes.
 
       connectTimeoutTimer = setTimeout(() => {
-        handleFailedAttempt(url, streamId);
+        handleFailedAttempt(streamId);
       }, CONNECT_TIMEOUT_MS);
 
       fallbackStartTimer = setTimeout(() => {
@@ -148,12 +167,22 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
     }
   }
 
+  // Builds the URL for the current connectAttempt (choosing a stream
+  // extension via extensionForAttempt) and connects. Used only for a fresh
+  // channel selection or a failed-attempt retry - the only paths that should
+  // be probing extensions at all.
+  async function connectWithProbe(streamId: number) {
+    if (!activeCreds) return;
+    const url = buildStreamUrl(activeCreds, streamId, extensionForAttempt(connectAttempt));
+    await connectToUrl(url, streamId);
+  }
+
   // Called when a connection attempt stalls (CONNECT_TIMEOUT_MS elapses with
   // no 'playback-restart') or mpv reports a definitive failure ('end-file'
   // with reason 'error'). Retries a bounded number of times - see
   // MAX_CONNECT_ATTEMPTS - before giving up and surfacing an error with
   // mpv's own stderr tail attached for diagnosis.
-  async function handleFailedAttempt(url: string, streamId: number) {
+  async function handleFailedAttempt(streamId: number) {
     if (get().currentChannel?.stream_id !== streamId || get().status !== 'loading') return;
     stopConnectTimeout();
     connectAttempt += 1;
@@ -162,7 +191,7 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
     if (connectAttempt < MAX_CONNECT_ATTEMPTS) {
       await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
       if (get().currentChannel?.stream_id !== streamId || get().status !== 'loading') return;
-      await connect(url, streamId);
+      await connectWithProbe(streamId);
       return;
     }
 
@@ -213,12 +242,12 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
           stopHeartbeat();
           if ((get().status === 'playing' || get().status === 'loading') && channel && lastStreamUrl) {
             connectAttempt = 0;
-            connect(lastStreamUrl, channel.stream_id);
+            connectToUrl(lastStreamUrl, channel.stream_id);
           }
         } else if (event.event === 'end-file') {
           const channel = get().currentChannel;
-          if (event.reason === 'error' && get().status === 'loading' && channel && lastStreamUrl) {
-            handleFailedAttempt(lastStreamUrl, channel.stream_id);
+          if (event.reason === 'error' && get().status === 'loading' && channel && activeCreds) {
+            handleFailedAttempt(channel.stream_id);
           } else if (event.reason && event.reason !== 'eof' && event.reason !== 'stop' && event.reason !== 'quit') {
             logWarn(`unexpected mpv end-file reason "${event.reason}" while status was ${get().status}`);
           }
@@ -255,18 +284,18 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
       });
     },
 
-    async selectChannel(channel, creds, streamExtension) {
+    async selectChannel(channel, creds) {
       connectAttempt = 0;
+      activeCreds = creds;
       set({ currentChannel: channel });
-      const url = buildStreamUrl(creds, channel.stream_id, streamExtension);
-      await connect(url, channel.stream_id);
+      await connectWithProbe(channel.stream_id);
     },
 
     async play() {
       const channel = get().currentChannel;
       if (!channel || !lastStreamUrl) return;
       connectAttempt = 0;
-      await connect(lastStreamUrl, channel.stream_id);
+      await connectToUrl(lastStreamUrl, channel.stream_id);
     },
 
     async stop() {

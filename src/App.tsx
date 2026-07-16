@@ -238,14 +238,13 @@ function AppContent() {
         await selectChannel(
           channel,
           { baseUrl: settings.baseUrl, username: settings.username, password: settings.password },
-          settings.streamExtension,
         );
         if (libraryLoaded) recordPlay(channel.stream_id);
       } catch (err) {
         logError(`playback failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     },
-    [channels, settings.baseUrl, settings.username, settings.password, settings.streamExtension, selectChannel, libraryLoaded, recordPlay],
+    [channels, settings.baseUrl, settings.username, settings.password, selectChannel, libraryLoaded, recordPlay],
   );
 
   useEffect(() => {
