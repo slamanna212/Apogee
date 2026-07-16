@@ -17,7 +17,7 @@ export interface Settings {
   streamExtension: string;
   categoryId: string | null;
   categoryName: string | null;
-  defaultVolume: number;
+  volume: number;
   updateChannel: UpdateChannel;
   keepMiniWindowOnTop: boolean;
   onboardingComplete: boolean;
@@ -34,7 +34,7 @@ export const DEFAULT_SETTINGS: Settings = {
   streamExtension: '.ts',
   categoryId: null,
   categoryName: null,
-  defaultVolume: 70,
+  volume: 80,
   updateChannel: 'stable',
   keepMiniWindowOnTop: true,
   onboardingComplete: false,
@@ -95,10 +95,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     // onboarding as already done rather than replaying it on their next launch.
     const isPreOnboardingInstall = stored.onboardingComplete === undefined && !!stored.baseUrl && !!stored.username && !!stored.categoryId;
 
+    // Carry over the old fixed "default volume" setting as the initial
+    // remembered volume for installs that predate this being a live value.
+    const legacyDefaultVolume = typeof stored.defaultVolume === 'number' ? stored.defaultVolume : undefined;
+
     set({
       settings: {
         ...DEFAULT_SETTINGS,
         ...(stored as Partial<PersistedSettings>),
+        volume: typeof stored.volume === 'number' ? stored.volume : (legacyDefaultVolume ?? DEFAULT_SETTINGS.volume),
         password: password ?? '',
         onboardingComplete: isPreOnboardingInstall || Boolean(stored.onboardingComplete),
       },

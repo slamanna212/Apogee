@@ -13,6 +13,7 @@ import {
 } from '../lib/mpvClient';
 import { buildStreamUrl, type XtreamCredentials } from '../lib/xtream';
 import { onMediaControlEvent, setMediaPlayback } from '../lib/mediaSession';
+import { useSettingsStore } from './settingsStore';
 
 // Plain console.* calls only reach a devtools console (invisible in a
 // production build) - @tauri-apps/plugin-log's functions instead invoke the
@@ -50,6 +51,10 @@ type PlayerStore = PlayerState & PlayerActions;
 let listening = false;
 let fallbackTimer: ReturnType<typeof setInterval> | null = null;
 let fallbackStartTimer: ReturnType<typeof setTimeout> | null = null;
+// Volume slider onChange fires on every pointer-move while dragging - debounce
+// writing to settings.json so a drag doesn't hammer disk with one save per tick.
+const VOLUME_PERSIST_DEBOUNCE_MS = 400;
+let volumePersistTimer: ReturnType<typeof setTimeout> | null = null;
 // Last connected stream URL, kept around so `play()` can reconnect after a
 // `stop()` without needing the channel to be reselected from the list.
 let lastStreamUrl: string | null = null;
@@ -168,7 +173,7 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
   return {
     status: 'idle',
     currentChannel: null,
-    volume: 70,
+    volume: 80,
     bitrateKbps: null,
     errorMessage: null,
 
@@ -268,6 +273,11 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
       if (get().currentChannel) {
         await mpvSetVolume(volume);
       }
+      if (volumePersistTimer) clearTimeout(volumePersistTimer);
+      volumePersistTimer = setTimeout(() => {
+        volumePersistTimer = null;
+        useSettingsStore.getState().update({ volume });
+      }, VOLUME_PERSIST_DEBOUNCE_MS);
     },
   };
 });

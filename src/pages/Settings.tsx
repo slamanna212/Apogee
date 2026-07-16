@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, Badge, Button, Group, Paper, PasswordInput, Select, Slider, Stack, Switch, Text, TextInput } from '@mantine/core';
+import { Alert, Badge, Button, Group, Paper, PasswordInput, Select, Stack, Switch, Text, TextInput } from '@mantine/core';
 import { IconBrandLastfm } from '@tabler/icons-react';
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
@@ -87,7 +87,6 @@ export function Settings() {
   const [username, setUsername] = useState(settings.username);
   const [password, setPassword] = useState(settings.password);
   const [streamExtension, setStreamExtension] = useState(settings.streamExtension);
-  const [defaultVolume, setDefaultVolume] = useState(settings.defaultVolume);
   const [categories, setCategories] = useState<XtreamCategory[]>([]);
   const [categoryId, setCategoryId] = useState<string | null>(settings.categoryId);
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
@@ -137,7 +136,6 @@ export function Settings() {
     setUsername(settings.username);
     setPassword(settings.password);
     setStreamExtension(settings.streamExtension);
-    setDefaultVolume(settings.defaultVolume);
     setCategoryId(settings.categoryId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsLoaded]);
@@ -162,7 +160,6 @@ export function Settings() {
       username,
       password,
       streamExtension,
-      defaultVolume,
       categoryId,
       categoryName: category?.category_name ?? settings.categoryName,
     });
@@ -220,12 +217,6 @@ export function Settings() {
 
         <Card title="Playback">
           <Select label="Stream extension" data={['.ts', '.m3u8']} value={streamExtension} onChange={(v) => setStreamExtension(v ?? '.ts')} />
-          <div>
-            <Text size="sm" fw={500} mb={4}>
-              Default volume
-            </Text>
-            <Slider value={defaultVolume} onChange={setDefaultVolume} min={0} max={100} label={(v) => `${v}%`} />
-          </div>
         </Card>
 
         <Card title="Appearance">

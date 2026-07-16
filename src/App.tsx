@@ -282,7 +282,7 @@ function AppContent() {
 
   useEffect(() => {
     if (settingsLoaded) {
-      usePlayerStore.setState({ volume: settings.defaultVolume });
+      usePlayerStore.setState({ volume: settings.volume });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsLoaded]);
