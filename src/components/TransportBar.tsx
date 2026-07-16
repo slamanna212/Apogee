@@ -682,6 +682,7 @@ export function TransportBar({
             onToggleFavorite={onToggleFavorite ?? (() => {})}
             triggerStyle={{ ...dotsButtonStyle, color: isFavorite ? 'var(--app-accent)' : 'var(--app-text)' }}
             position="top-end"
+            layout={isMiniPlayer ? 'horizontal' : 'vertical'}
           />
         )}
       </div>

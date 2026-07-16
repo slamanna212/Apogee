@@ -12,6 +12,7 @@ interface ChannelActionsMenuProps {
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
   position?: FloatingPosition;
+  layout?: 'vertical' | 'horizontal';
 }
 
 export function ChannelActionsMenu({
@@ -22,8 +23,11 @@ export function ChannelActionsMenu({
   onMouseEnter,
   onMouseLeave,
   position = 'bottom-end',
+  layout = 'vertical',
 }: ChannelActionsMenuProps) {
   const { trackEntry, artistEntry, followTrack, followArtist, unfollowTrack, unfollowArtist } = useTrackFollowState(nowPlaying);
+  const horizontal = layout === 'horizontal';
+  const itemStyle = horizontal ? { width: 'auto', flex: 'none', whiteSpace: 'nowrap' as const } : undefined;
 
   function stop(e: MouseEvent, action: () => void) {
     e.stopPropagation();
@@ -31,7 +35,7 @@ export function ChannelActionsMenu({
   }
 
   return (
-    <Menu position={position} withinPortal>
+    <Menu position={horizontal ? 'left' : position} withinPortal offset={8}>
       <Menu.Target>
         <div
           onClick={(e) => e.stopPropagation()}
@@ -44,23 +48,30 @@ export function ChannelActionsMenu({
           <IconDotsVertical size={16} />
         </div>
       </Menu.Target>
-      <Menu.Dropdown>
+      <Menu.Dropdown
+        style={horizontal ? { display: 'flex', alignItems: 'center', gap: 4, padding: 6 } : undefined}
+      >
         {nowPlaying && (
           <>
             {trackEntry ? (
-              <Menu.Item onClick={(e) => stop(e, unfollowTrack)}>Unfollow track</Menu.Item>
+              <Menu.Item style={itemStyle} onClick={(e) => stop(e, unfollowTrack)}>Unfollow track</Menu.Item>
             ) : (
-              <Menu.Item onClick={(e) => stop(e, followTrack)}>Follow track</Menu.Item>
+              <Menu.Item style={itemStyle} onClick={(e) => stop(e, followTrack)}>Follow track</Menu.Item>
             )}
             {artistEntry ? (
-              <Menu.Item onClick={(e) => stop(e, unfollowArtist)}>Unfollow artist</Menu.Item>
+              <Menu.Item style={itemStyle} onClick={(e) => stop(e, unfollowArtist)}>Unfollow artist</Menu.Item>
             ) : (
-              <Menu.Item onClick={(e) => stop(e, followArtist)}>Follow artist</Menu.Item>
+              <Menu.Item style={itemStyle} onClick={(e) => stop(e, followArtist)}>Follow artist</Menu.Item>
             )}
-            <Menu.Divider />
+            {horizontal ? (
+              <div style={{ width: 1, height: 24, margin: '0 2px', background: 'var(--app-border)', flex: 'none' }} />
+            ) : (
+              <Menu.Divider />
+            )}
           </>
         )}
         <Menu.Item
+          style={itemStyle}
           leftSection={isFavorite ? <IconStarFilled size={14} /> : <IconStar size={14} />}
           onClick={(e) => stop(e, onToggleFavorite)}
         >

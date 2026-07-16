@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { MantineProvider } from '@mantine/core';
-import { Notifications } from '@mantine/notifications';
+import { Notifications, notifications } from '@mantine/notifications';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { currentMonitor, primaryMonitor } from '@tauri-apps/api/window';
@@ -301,9 +301,13 @@ function AppContent() {
   }, [channels, fetchChannelMetadata]);
 
   useEffect(() => {
-    useAlertsStore.getState().scan(nowPlaying, handlePlayChannel);
+    useAlertsStore.getState().scan(nowPlaying, browserOpen, handlePlayChannel);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nowPlaying]);
+  }, [nowPlaying, browserOpen]);
+
+  useEffect(() => {
+    if (!browserOpen) notifications.clean();
+  }, [browserOpen]);
 
   const currentNowPlaying = currentChannel ? nowPlaying.get(currentChannel.stream_id) : undefined;
 

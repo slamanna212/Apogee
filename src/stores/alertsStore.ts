@@ -28,7 +28,11 @@ interface AlertsState extends PersistedAlerts {
   unfollow: (id: string) => Promise<void>;
   setNotifyOS: (value: boolean) => Promise<void>;
   setNotifyInApp: (value: boolean) => Promise<void>;
-  scan: (nowPlaying: Map<number, StellarStation>, onGoToChannel?: (streamId: number) => void) => void;
+  scan: (
+    nowPlaying: Map<number, StellarStation>,
+    allowInAppNotifications: boolean,
+    onGoToChannel?: (streamId: number) => void,
+  ) => void;
 }
 
 let storePromise: Promise<Store> | null = null;
@@ -89,7 +93,7 @@ export const useAlertsStore = create<AlertsState>((set, get) => ({
     set({ notifyInApp: value });
     await persist({ entries, notifyOS, notifyInApp: value });
   },
-  scan(nowPlaying, onGoToChannel) {
+  scan(nowPlaying, allowInAppNotifications, onGoToChannel) {
     const { entries, notifyOS, notifyInApp, lastMatched } = get();
     if (entries.length === 0) return;
     const channels = useChannelStore.getState().channels;
@@ -102,7 +106,15 @@ export const useAlertsStore = create<AlertsState>((set, get) => ({
       const match = entries.find((entry) => matchesEntry(station, entry));
       if (match) {
         const channelName = channels.find((c) => c.stream_id === streamId)?.name ?? station.name;
-        void fireAlert(match, station, streamId, channelName, notifyOS, notifyInApp, onGoToChannel);
+        void fireAlert(
+          match,
+          station,
+          streamId,
+          channelName,
+          notifyOS,
+          notifyInApp && allowInAppNotifications,
+          onGoToChannel,
+        );
       }
     }
   },
