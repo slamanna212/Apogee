@@ -162,7 +162,8 @@ jobs:
           sudo add-apt-repository -y universe
           sudo apt-get update
           sudo apt-get install -y build-essential curl wget file libxdo-dev libssl-dev \
-            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm libfuse2
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm libfuse2 xdg-utils \
+            pkg-config libglib2.0-bin libgtk-3-bin libgdk-pixbuf2.0-bin desktop-file-utils zsync
 
       - name: Setup Node
         uses: actions/setup-node@v6
