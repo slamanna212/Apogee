@@ -24,7 +24,7 @@ jobs:
       release_exists: ${{ steps.check_release.outputs.exists }}
     steps:
       - name: Checkout dev
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: dev
 
@@ -32,7 +32,7 @@ jobs:
         uses: ./.github/actions/setup-gh-cli
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
 
@@ -62,12 +62,12 @@ jobs:
     runs-on: rapture-apogee
     steps:
       - name: Checkout dev
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: dev
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
@@ -84,12 +84,12 @@ jobs:
     runs-on: rapture-apogee
     steps:
       - name: Checkout dev
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: dev
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
@@ -110,7 +110,7 @@ jobs:
       release_id: ${{ steps.create.outputs.release_id }}
     steps:
       - name: Checkout dev
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: dev
 
@@ -148,7 +148,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout dev
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: dev
 
@@ -166,7 +166,7 @@ jobs:
             pkg-config libglib2.0-bin libgtk-3-bin libgdk-pixbuf2.0-bin desktop-file-utils zsync
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
@@ -200,7 +200,7 @@ jobs:
           VERSION="$VERSION" perl -i -pe 'BEGIN{$done=0} if (!$done && s/^version = ".*"/version = "$ENV{VERSION}"/) { $done=1 }' src-tauri/Cargo.toml
 
       - name: Build and release
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -249,7 +249,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout dev
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: dev
 
