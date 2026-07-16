@@ -90,6 +90,32 @@ pub fn run() {
         }
       }
 
+      // The window is transparent/undecorated so the transport bar reads as a
+      // frosted pill floating over the desktop. CSS `backdrop-filter` can't blur
+      // the desktop behind a transparent window (it only sees webview pixels),
+      // so on Windows/macOS we ask the OS compositor to do the real blur. Linux
+      // (GNOME/Mutter) has no window-blur effect, so there it falls back to a
+      // near-opaque CSS tint instead (see `.apogee-glass` in index.css). Errors
+      // are ignored so a compositor quirk can never abort startup.
+      #[cfg(any(target_os = "windows", target_os = "macos"))]
+      if let Some(window) = app.get_webview_window("main") {
+        #[cfg(target_os = "windows")]
+        {
+          use window_vibrancy::apply_acrylic;
+          let _ = apply_acrylic(&window, Some((10, 9, 17, 125)));
+        }
+        #[cfg(target_os = "macos")]
+        {
+          use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
+          let _ = apply_vibrancy(
+            &window,
+            NSVisualEffectMaterial::HudWindow,
+            Some(NSVisualEffectState::Active),
+            None,
+          );
+        }
+      }
+
       Ok(())
     })
     .build(tauri::generate_context!())

@@ -44,7 +44,11 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
     '--app-accent2-soft': 'rgba(32,184,201,0.15)',
     '--app-shadow': '0 8px 20px rgba(90,60,180,.16), 0 2px 5px rgba(90,60,180,.1)',
     '--app-shadow-card': '0 1px 2px rgba(90,60,180,.08), 0 6px 14px -6px rgba(90,60,180,.14), 0 12px 24px -12px rgba(90,60,180,.14)',
-    '--app-glass-bg': 'rgba(255,255,255,0.9)',
+    // Translucent so native window vibrancy (macOS) / acrylic (Windows) reads
+    // through it. Linux has no compositor blur, so index.css swaps in the opaque
+    // variant below for that platform.
+    '--app-glass-bg': 'rgba(255,255,255,0.55)',
+    '--app-glass-bg-opaque': 'rgba(255,255,255,0.97)',
   },
   dark: {
     '--app-bg': '#07060d',
@@ -61,6 +65,7 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
     '--app-accent2-soft': 'rgba(69,224,216,0.15)',
     '--app-shadow': '0 8px 20px rgba(0,0,0,.35), 0 2px 5px rgba(0,0,0,.25)',
     '--app-shadow-card': '0 1px 2px rgba(0,0,0,.3), 0 6px 14px -6px rgba(0,0,0,.35), 0 12px 24px -12px rgba(0,0,0,.35)',
-    '--app-glass-bg': 'linear-gradient(180deg, rgba(20,18,32,0.9), rgba(10,9,17,0.86))',
+    '--app-glass-bg': 'linear-gradient(180deg, rgba(20,18,32,0.45), rgba(10,9,17,0.4))',
+    '--app-glass-bg-opaque': 'rgba(16,14,26,0.96)',
   },
 });

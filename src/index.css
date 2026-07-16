@@ -106,12 +106,25 @@ body,
   opacity: 0;
 }
 
+/* Frosted surfaces (transport bar, volume popovers, collapsed pill). The blur
+   is done by the OS compositor behind the transparent window — native acrylic
+   on Windows, vibrancy on macOS (see src-tauri/src/lib.rs). CSS `backdrop-filter`
+   is deliberately NOT used: it can only blur webview-painted pixels, so over the
+   transparent window / bare desktop it blurs nothing and just leaks the backdrop
+   through. The translucent `--app-glass-bg` tint lets the native frost read. */
 .apogee-glass {
   background: var(--app-glass-bg);
   border: 1px solid var(--app-border);
-  -webkit-backdrop-filter: blur(72px) saturate(180%);
-  backdrop-filter: blur(72px) saturate(180%);
   box-shadow: var(--app-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* Linux (GNOME/Mutter) has no window-blur effect, so there's no native frost to
+   read through — make the surface near-opaque instead so content behind it isn't
+   legible and text stays readable. The per-scheme opaque colors come through
+   Mantine's own color-scheme var mechanism, so this doesn't depend on where the
+   `data-mantine-color-scheme` attribute lives. */
+:root[data-platform='linux'] .apogee-glass {
+  background: var(--app-glass-bg-opaque);
 }
 
 /* Themed scrollbars: replace the default OS/browser scrollbar with a thin,

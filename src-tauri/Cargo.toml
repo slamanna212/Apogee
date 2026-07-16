@@ -46,6 +46,7 @@ notify-rust = "=4.18.0"
 keyring = { version = "=3.6.3", features = ["windows-native"] }
 win32job = "=2.0.3"
 cpal = "=0.15.3"
+window-vibrancy = "=0.7.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "=3.6.3", features = ["apple-native"] }
@@ -55,3 +56,4 @@ objc2-foundation = { version = "=0.3.2", features = ["NSArray", "NSString", "NSO
 objc2-core-audio = { version = "=0.3.2", features = ["AudioHardware", "objc2", "objc2-core-audio-types"] }
 objc2-core-audio-types = "=0.3.2"
 objc2-core-foundation = { version = "=0.3.2", features = ["CFDictionary", "CFArray", "CFString", "CFNumber", "CFBase"] }
+window-vibrancy = "=0.7.1"

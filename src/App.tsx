@@ -596,6 +596,17 @@ function App() {
 
   useEffect(() => {
     document.body.style.background = 'transparent';
+    // The `.apogee-glass` surfaces are translucent on Windows/macOS so the
+    // native acrylic/vibrancy behind the window shows through, but near-opaque
+    // on Linux (no compositor blur there). CSS keys those overrides off this
+    // attribute. UA sniffing is sufficient: WebView2 reports "Windows",
+    // WKWebView "Macintosh", WebKitGTK "Linux".
+    const ua = navigator.userAgent;
+    document.documentElement.dataset.platform = ua.includes('Windows')
+      ? 'windows'
+      : ua.includes('Mac')
+        ? 'macos'
+        : 'linux';
   }, []);
 
   return (
