@@ -17,6 +17,7 @@ import { useLibraryStore } from './stores/libraryStore';
 import { useUpdateStore } from './stores/updateStore';
 import { useAlertsStore } from './stores/alertsStore';
 import { useScrobblingStore } from './stores/scrobblingStore';
+import { useSleepTimerStore } from './stores/sleepTimerStore';
 import { setMediaMetadata } from './lib/mediaSession';
 import {
   discordRpcConnect,
@@ -194,11 +195,14 @@ function AppContent() {
     status: playerStatus,
     currentChannel,
     volume,
+    muted,
     errorMessage,
+    isBuffering,
     selectChannel,
     play,
     stop,
     setVolume,
+    toggleMute,
     initEventListener,
   } = usePlayerStore();
   const { loaded: libraryLoaded, load: loadLibrary, recordPlay, favorites, toggleFavorite } = useLibraryStore();
@@ -228,6 +232,8 @@ function AppContent() {
     async (streamId: number) => {
       const channel = channels.find((c) => c.stream_id === streamId);
       if (!channel) return;
+      // Switching channels shouldn't leave a timer armed from the previous one.
+      useSleepTimerStore.getState().cancel();
       try {
         await selectChannel(
           channel,
@@ -657,11 +663,16 @@ function AppContent() {
             onPlus={handlePlus}
             onMinus={handleMinus}
             errorMessage={errorMessage}
+            isBuffering={isBuffering}
             onPlayStop={() => {
-              const action = playerStatus === 'playing' || playerStatus === 'loading' ? stop() : play();
+              const stopping = playerStatus === 'playing' || playerStatus === 'loading';
+              if (stopping) useSleepTimerStore.getState().cancel();
+              const action = stopping ? stop() : play();
               action.catch((err) => logError(`play/stop failed: ${err instanceof Error ? err.message : String(err)}`));
             }}
             onVolumeChange={setVolume}
+            muted={muted}
+            onToggleMute={toggleMute}
             compactVolumePopover={!browserOpen}
             isMiniPlayer={!browserOpen}
           />

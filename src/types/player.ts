@@ -6,6 +6,8 @@ export interface PlayerState {
   status: PlayerStatus;
   currentChannel: XtreamChannel | null;
   volume: number;
+  muted: boolean;
   bitrateKbps: number | null;
   errorMessage: string | null;
+  isBuffering: boolean;
 }

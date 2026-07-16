@@ -21,8 +21,15 @@ export function setMediaPlayback(playing: boolean): Promise<void> {
   return invoke('media_session_set_playback', { playing });
 }
 
-export type MediaControlKind = 'play' | 'pause' | 'toggle';
+export type MediaControlKind = 'play' | 'pause' | 'toggle' | 'volume';
 
-export function onMediaControlEvent(callback: (kind: MediaControlKind) => void) {
-  return listen<{ kind: MediaControlKind }>('media-control-event', (e) => callback(e.payload.kind));
+export function onMediaControlEvent(callback: (kind: MediaControlKind, value?: number) => void) {
+  return listen<{ kind: MediaControlKind; value: number | null }>('media-control-event', (e) =>
+    callback(e.payload.kind, e.payload.value ?? undefined),
+  );
+}
+
+/** souvlaki's MPRIS volume is 0.0-1.0, distinct from the app's internal 0-100 scale. */
+export function setMediaVolume(volume: number): Promise<void> {
+  return invoke('media_session_set_volume', { volume });
 }

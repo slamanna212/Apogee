@@ -25,6 +25,7 @@ export interface Settings {
   verboseLogging: boolean;
   discordRpcEnabled: boolean;
   scrobbling: ScrobblingSettings;
+  lastSleepTimerMinutes: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -42,6 +43,7 @@ export const DEFAULT_SETTINGS: Settings = {
   verboseLogging: false,
   discordRpcEnabled: false,
   scrobbling: { lastfm: { enabled: false } },
+  lastSleepTimerMinutes: 30,
 };
 
 type PersistedSettings = Omit<Settings, 'password'>;
