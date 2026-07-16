@@ -38,9 +38,9 @@ function Row({ title, subtitle, channels, channelMetadata, nowPlaying, favorites
               nowPlaying={nowPlaying.get(channel.stream_id)}
               isFavorite={favorites.includes(channel.stream_id)}
               isPlaying={channel.stream_id === currentChannelId}
-              onToggleFavorite={() => onToggleFavorite(channel.stream_id)}
-              onClick={() => onPlay(channel.stream_id)}
-              onInfo={() => onSelect(channel.stream_id)}
+              onToggleFavorite={onToggleFavorite}
+              onClick={onPlay}
+              onInfo={onSelect}
             />
           </div>
         ))}

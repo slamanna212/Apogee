@@ -148,9 +148,9 @@ export function ChannelGrid({
                     metadata={channelMetadata.get(channel.stream_id)}
                     isFavorite={favoriteSet.has(channel.stream_id)}
                     isPlaying={channel.stream_id === currentChannelId}
-                    onToggleFavorite={() => onToggleFavorite(channel.stream_id)}
-                    onClick={() => onPlay(channel.stream_id)}
-                    onInfo={() => onSelect(channel.stream_id)}
+                    onToggleFavorite={onToggleFavorite}
+                    onClick={onPlay}
+                    onInfo={onSelect}
                     nowPlaying={nowPlaying?.get(channel.stream_id)}
                   />
                 ))}
@@ -164,9 +164,9 @@ export function ChannelGrid({
                     metadata={channelMetadata.get(channel.stream_id)}
                     isFavorite={favoriteSet.has(channel.stream_id)}
                     isPlaying={channel.stream_id === currentChannelId}
-                    onToggleFavorite={() => onToggleFavorite(channel.stream_id)}
-                    onClick={() => onPlay(channel.stream_id)}
-                    onInfo={() => onSelect(channel.stream_id)}
+                    onToggleFavorite={onToggleFavorite}
+                    onClick={onPlay}
+                    onInfo={onSelect}
                     nowPlaying={nowPlaying?.get(channel.stream_id)}
                   />
                 ))}

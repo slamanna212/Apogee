@@ -1,4 +1,4 @@
-import { fetch } from '@tauri-apps/plugin-http';
+import { fetchWithTimeout as fetch } from './fetchWithTimeout';
 import type {
   StellarChannel,
   StellarChannelsResponse,

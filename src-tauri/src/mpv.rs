@@ -2,18 +2,79 @@ use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
+/// Per-process IPC path (rather than a single fixed name) so a stale/
+/// abandoned socket from another instance can never collide with, or be
+/// pre-created ahead of, this one - see `ipc_path`.
 #[cfg(unix)]
-const IPC_PATH: &str = "/tmp/apogee-mpv.sock";
+fn ipc_path() -> &'static str {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(|| format!("/tmp/apogee-mpv-{}.sock", std::process::id()))
+}
 #[cfg(windows)]
-const IPC_PATH: &str = r"\\.\pipe\apogee-mpv";
+fn ipc_path() -> &'static str {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(|| format!(r"\\.\pipe\apogee-mpv-{}", std::process::id()))
+}
 
 const STDERR_TAIL_LINES: usize = 40;
+
+/// Caps applied to `read_bounded_line` so a malformed or hostile write to the
+/// mpv IPC socket/stderr pipe (see `ipc_path`'s doc comment for why the
+/// socket path alone isn't a complete guarantee against another local
+/// process connecting) can't grow the read buffer unbounded by never sending
+/// a newline.
+const MAX_IPC_LINE_BYTES: usize = 1024 * 1024;
+const MAX_STDERR_LINE_BYTES: usize = 64 * 1024;
+
+/// Reads one `\n`-terminated line, capping accumulated bytes at `max_len`
+/// unlike `AsyncBufReadExt::lines()`, which has no bound and will grow its
+/// buffer indefinitely if a line is never terminated. Returns `Ok(None)` on
+/// clean EOF with no partial line pending.
+async fn read_bounded_line<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+    max_len: usize,
+) -> std::io::Result<Option<String>> {
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            return if buf.is_empty() {
+                Ok(None)
+            } else {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "stream ended mid-line",
+                ))
+            };
+        }
+        if let Some(pos) = available.iter().position(|&b| b == b'\n') {
+            buf.extend_from_slice(&available[..=pos]);
+            reader.consume(pos + 1);
+            break;
+        }
+        if buf.len() + available.len() > max_len {
+            let discard = available.len();
+            reader.consume(discard);
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("line exceeded {max_len} bytes"),
+            ));
+        }
+        buf.extend_from_slice(available);
+        let n = available.len();
+        reader.consume(n);
+    }
+    while matches!(buf.last(), Some(b'\n' | b'\r')) {
+        buf.pop();
+    }
+    Ok(Some(String::from_utf8_lossy(&buf).into_owned()))
+}
 
 trait AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> AsyncReadWrite for T {}
@@ -258,7 +319,7 @@ fn spawn_mpv(mpv_path: &str) -> std::io::Result<Child> {
     cmd.args([
         "--no-video",
         "--idle=yes",
-        &format!("--input-ipc-server={IPC_PATH}"),
+        &format!("--input-ipc-server={}", ipc_path()),
     ])
     .stdout(Stdio::null())
     .stderr(Stdio::piped())
@@ -319,7 +380,7 @@ async fn ensure_started(app: &AppHandle, state: &MpvState) -> Result<(), String>
     }
 
     #[cfg(unix)]
-    let _ = std::fs::remove_file(IPC_PATH);
+    let _ = std::fs::remove_file(ipc_path());
 
     state.stderr_tail.lock().await.clear();
 
@@ -337,10 +398,19 @@ async fn ensure_started(app: &AppHandle, state: &MpvState) -> Result<(), String>
     if let Some(stderr) = child.stderr.take() {
         let tail = state.stderr_tail.clone();
         tokio::spawn(async move {
-            let mut lines = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                log::warn!("mpv: {line}");
-                push_stderr_tail(&tail, line).await;
+            let mut reader = BufReader::new(stderr);
+            loop {
+                match read_bounded_line(&mut reader, MAX_STDERR_LINE_BYTES).await {
+                    Ok(Some(line)) => {
+                        log::warn!("mpv: {line}");
+                        push_stderr_tail(&tail, line).await;
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        log::warn!("mpv stderr line stream ended abnormally: {e}");
+                        break;
+                    }
+                }
             }
         });
     }
@@ -358,8 +428,22 @@ async fn ensure_started(app: &AppHandle, state: &MpvState) -> Result<(), String>
             log::error!("{message}");
             return Err(message);
         }
-        match connect_ipc(IPC_PATH).await {
+        match connect_ipc(ipc_path()).await {
             Ok(s) => {
+                // Restrict the socket to the owning user - by default it's
+                // created with whatever mpv's umask produces, which could
+                // let another local user on a shared machine connect and
+                // drive mpv's full remote-control IPC surface.
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Err(e) = std::fs::set_permissions(
+                        ipc_path(),
+                        std::fs::Permissions::from_mode(0o600),
+                    ) {
+                        log::warn!("failed to restrict mpv IPC socket permissions: {e}");
+                    }
+                }
                 stream = Some(s);
                 break;
             }
@@ -388,8 +472,16 @@ async fn ensure_started(app: &AppHandle, state: &MpvState) -> Result<(), String>
     let inner_for_reader = state.inner.clone();
     let stderr_tail_for_reader = state.stderr_tail.clone();
     tokio::spawn(async move {
-        let mut lines = BufReader::new(read_half).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
+        let mut reader = BufReader::new(read_half);
+        loop {
+            let line = match read_bounded_line(&mut reader, MAX_IPC_LINE_BYTES).await {
+                Ok(Some(line)) => line,
+                Ok(None) => break,
+                Err(e) => {
+                    log::warn!("mpv IPC line stream ended abnormally: {e}");
+                    break;
+                }
+            };
             match serde_json::from_str::<Value>(&line) {
                 Ok(value) => {
                     // Every message mpv sends over IPC (property changes,
@@ -454,7 +546,14 @@ async fn ensure_started(app: &AppHandle, state: &MpvState) -> Result<(), String>
 }
 
 async fn send_command(state: &MpvState, cmd: Value) -> Result<(), String> {
-    log::debug!("mpv command: {}", describe_command_for_log(&cmd));
+    // describe_command_for_log clones and walks the command JSON to redact
+    // credentials before formatting it - skip that work entirely when debug
+    // logging is off (the default), rather than relying on log::debug!'s own
+    // level check, which only skips the *macro expansion's* formatting, not
+    // evaluation of an argument expression computed ahead of the call.
+    if log::log_enabled!(log::Level::Debug) {
+        log::debug!("mpv command: {}", describe_command_for_log(&cmd));
+    }
     let mut guard = state.inner.lock().await;
     let inner = guard
         .as_mut()
@@ -478,6 +577,17 @@ pub async fn mpv_load(
     state: State<'_, MpvState>,
     url: String,
 ) -> Result<(), String> {
+    // mpv's `loadfile` isn't restricted to http(s) media URLs - it can also
+    // open local files or other protocol handlers mpv supports. The app
+    // itself only ever constructs http(s) stream URLs (see buildStreamUrl in
+    // src/lib/xtream.ts), so reject anything else here rather than
+    // forwarding it to mpv unchecked.
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        let message = "mpv_load rejected: url must be http:// or https://".to_string();
+        log::warn!("{message}");
+        return Err(message);
+    }
+
     log::debug!("mpv_load: {}", redact_credentials(&url));
     ensure_started(&app, &state).await?;
     send_command(&state, json!({ "command": ["loadfile", url, "replace"] })).await

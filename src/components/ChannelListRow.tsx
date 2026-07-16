@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { Text, useComputedColorScheme } from '@mantine/core';
 import { IconInfoCircle, IconPlayerPlayFilled } from '@tabler/icons-react';
 import type { XtreamChannel } from '../types/xtream';
@@ -12,13 +12,13 @@ interface ChannelListRowProps {
   metadata?: StellarChannel;
   isFavorite: boolean;
   isPlaying?: boolean;
-  onToggleFavorite: () => void;
-  onClick: () => void;
-  onInfo: () => void;
+  onToggleFavorite: (streamId: number) => void;
+  onClick: (streamId: number) => void;
+  onInfo: (streamId: number) => void;
   nowPlaying?: StellarStation;
 }
 
-export function ChannelListRow({
+function ChannelListRowImpl({
   channel,
   metadata,
   isFavorite,
@@ -41,7 +41,7 @@ export function ChannelListRow({
 
   return (
     <div
-      onClick={onClick}
+      onClick={() => onClick(channel.stream_id)}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       role="button"
@@ -59,7 +59,13 @@ export function ChannelListRow({
       <div style={{ width: 92, flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
         <div style={{ position: 'relative', width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {logoUrl ? (
-            <img src={logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+            <img
+              src={logoUrl}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+            />
           ) : (
             <div style={{ width: '70%', height: '70%', borderRadius: 8, background: 'var(--app-panel2)' }} />
           )}
@@ -108,6 +114,8 @@ export function ChannelListRow({
         <img
           src={artworkUrl}
           alt=""
+          loading="lazy"
+          decoding="async"
           style={{ width: 68, height: 68, borderRadius: 16, objectFit: 'cover', flex: 'none', background: 'var(--app-panel2)' }}
         />
       ) : (
@@ -146,7 +154,7 @@ export function ChannelListRow({
         <ChannelActionsMenu
           nowPlaying={nowPlaying}
           isFavorite={isFavorite}
-          onToggleFavorite={onToggleFavorite}
+          onToggleFavorite={() => onToggleFavorite(channel.stream_id)}
           onMouseEnter={() => setActionHovered(true)}
           onMouseLeave={() => setActionHovered(false)}
           triggerStyle={{
@@ -162,7 +170,7 @@ export function ChannelListRow({
         <div
           onClick={(e) => {
             e.stopPropagation();
-            onInfo();
+            onInfo(channel.stream_id);
           }}
           onMouseEnter={() => setActionHovered(true)}
           onMouseLeave={() => setActionHovered(false)}
@@ -184,3 +192,5 @@ export function ChannelListRow({
     </div>
   );
 }
+
+export const ChannelListRow = memo(ChannelListRowImpl);

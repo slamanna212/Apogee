@@ -25,18 +25,37 @@ pub(crate) fn delete(key: &str) -> Result<(), String> {
     }
 }
 
+/// Keys the frontend is allowed to touch through the generic secrets_*
+/// commands below. Other keyring entries under this app's service name
+/// (e.g. the Last.fm session key/username, set via `secrets::set` directly
+/// from lastfm.rs) are never routed through a generic command reachable
+/// from JS, and shouldn't become readable/overwritable through this one
+/// just because a caller happens to know the key string.
+const ALLOWED_FRONTEND_KEYS: &[&str] = &["xtream_password"];
+
+fn check_allowed_key(key: &str) -> Result<(), String> {
+    if ALLOWED_FRONTEND_KEYS.contains(&key) {
+        Ok(())
+    } else {
+        Err(format!("secrets: key \"{key}\" is not allowed"))
+    }
+}
+
 #[tauri::command]
 pub fn secrets_set(key: String, value: String) -> Result<(), String> {
+    check_allowed_key(&key)?;
     set(&key, &value)
 }
 
 #[tauri::command]
 pub fn secrets_get(key: String) -> Result<Option<String>, String> {
+    check_allowed_key(&key)?;
     get(&key)
 }
 
 #[tauri::command]
 pub fn secrets_delete(key: String) -> Result<(), String> {
+    check_allowed_key(&key)?;
     delete(&key)
 }
 
