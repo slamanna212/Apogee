@@ -86,7 +86,6 @@ export function Settings() {
   const [baseUrl, setBaseUrl] = useState(settings.baseUrl);
   const [username, setUsername] = useState(settings.username);
   const [password, setPassword] = useState(settings.password);
-  const [streamExtension, setStreamExtension] = useState(settings.streamExtension);
   const [categories, setCategories] = useState<XtreamCategory[]>([]);
   const [categoryId, setCategoryId] = useState<string | null>(settings.categoryId);
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
@@ -135,7 +134,6 @@ export function Settings() {
     setBaseUrl(settings.baseUrl);
     setUsername(settings.username);
     setPassword(settings.password);
-    setStreamExtension(settings.streamExtension);
     setCategoryId(settings.categoryId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsLoaded]);
@@ -159,7 +157,6 @@ export function Settings() {
       baseUrl,
       username,
       password,
-      streamExtension,
       categoryId,
       categoryName: category?.category_name ?? settings.categoryName,
     });
@@ -213,10 +210,6 @@ export function Settings() {
             disabled={categories.length === 0}
             searchable
           />
-        </Card>
-
-        <Card title="Playback">
-          <Select label="Stream extension" data={['.ts', '.m3u8']} value={streamExtension} onChange={(v) => setStreamExtension(v ?? '.ts')} />
         </Card>
 
         <Card title="Appearance">
