@@ -1,13 +1,13 @@
 import type { StellarStation } from '../types/stellarTunerLog';
 import type { AlertEntry } from '../types/alerts';
 
-export function normalizeText(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+export function normalizeText(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase().replace(/\s+/g, ' ') : '';
 }
 
 /** Removes StellarTunerLog's trailing two-digit title marker without changing case. */
-export function stripTrailingTitleNumber(value: string): string {
-  return value.trim().replace(/\s*\(\d{2}\)\s*$/, '');
+export function stripTrailingTitleNumber(value: unknown): string {
+  return typeof value === 'string' ? value.trim().replace(/\s*\(\d{2}\)\s*$/, '') : '';
 }
 
 /**
@@ -15,7 +15,7 @@ export function stripTrailingTitleNumber(value: string): string {
  * parenthetical suffix (e.g. "Song Name (01)") that isn't always present
  * when the same song is actually playing, so strip it before comparing.
  */
-export function normalizeTitle(value: string): string {
+export function normalizeTitle(value: unknown): string {
   return normalizeText(stripTrailingTitleNumber(value));
 }
 

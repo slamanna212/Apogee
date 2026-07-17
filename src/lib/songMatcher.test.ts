@@ -17,6 +17,11 @@ describe('stripTrailingTitleNumber', () => {
   it('is shared by alert title normalization', () => {
     expect(normalizeTitle(' Song   Name (93) ')).toBe('song name');
   });
+
+  it('treats null or missing remote titles as empty strings', () => {
+    expect(stripTrailingTitleNumber(null)).toBe('');
+    expect(normalizeTitle(undefined)).toBe('');
+  });
 });
 
 function station(overrides: Partial<StellarStation> = {}): StellarStation {
@@ -55,5 +60,11 @@ describe('matchesEntry', () => {
 
   it('does not match a track alert with a missing title against a real title', () => {
     expect(matchesEntry(station(), entry({ title: undefined }))).toBe(false);
+  });
+
+  it('does not throw when live station metadata is null', () => {
+    const partial = { ...station(), artist: null, title: null } as unknown as StellarStation;
+    expect(() => matchesEntry(partial, entry())).not.toThrow();
+    expect(matchesEntry(partial, entry())).toBe(false);
   });
 });

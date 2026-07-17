@@ -3,22 +3,17 @@ import { load, type Store } from '@tauri-apps/plugin-store';
 import type { StellarStation } from '../types/stellarTunerLog';
 import type { AlertEntry } from '../types/alerts';
 import { matchesEntry, normalizeText, normalizeTitle } from '../lib/songMatcher';
+import { sanitizePersistedAlerts, type PersistedAlertsData } from '../lib/alertPersistence';
 import { ensureOSPermission, fireAlert } from '../lib/alertNotify';
 import { useChannelStore } from './channelStore';
 
-interface PersistedAlerts {
-  entries: AlertEntry[];
-  notifyOS: boolean;
-  notifyInApp: boolean;
-}
-
-const DEFAULT_ALERTS: PersistedAlerts = {
+const DEFAULT_ALERTS: PersistedAlertsData = {
   entries: [],
   notifyOS: true,
   notifyInApp: true,
 };
 
-interface AlertsState extends PersistedAlerts {
+interface AlertsState extends PersistedAlertsData {
   loaded: boolean;
   /** streamId -> last-seen normalized song key, for edge detection. Not persisted. */
   lastMatched: Map<number, string>;
@@ -43,7 +38,7 @@ function getStore() {
   return storePromise;
 }
 
-async function persist(next: PersistedAlerts) {
+async function persist(next: PersistedAlertsData) {
   const store = await getStore();
   await store.set('alerts', next);
   await store.save();
@@ -59,10 +54,11 @@ export const useAlertsStore = create<AlertsState>((set, get) => ({
   lastMatched: new Map(),
   async load() {
     const store = await getStore();
-    const stored = (await store.get<Partial<PersistedAlerts>>('alerts')) ?? {};
-    set({ ...DEFAULT_ALERTS, ...stored, loaded: true });
+    const stored = await store.get<unknown>('alerts');
+    set({ ...sanitizePersistedAlerts(stored), loaded: true });
   },
   async followTrack(artist, title) {
+    if (typeof artist !== 'string' || !artist.trim() || typeof title !== 'string' || !title.trim()) return;
     const { entries, notifyOS, notifyInApp } = get();
     const entry: AlertEntry = { id: crypto.randomUUID(), type: 'track', artist, title, createdAt: Date.now() };
     const next = [...entries, entry];
@@ -70,6 +66,7 @@ export const useAlertsStore = create<AlertsState>((set, get) => ({
     await persist({ entries: next, notifyOS, notifyInApp });
   },
   async followArtist(artist) {
+    if (typeof artist !== 'string' || !artist.trim()) return;
     const { entries, notifyOS, notifyInApp } = get();
     const entry: AlertEntry = { id: crypto.randomUUID(), type: 'artist', artist, createdAt: Date.now() };
     const next = [...entries, entry];
