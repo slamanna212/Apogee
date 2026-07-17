@@ -15,11 +15,26 @@
 
 ---
 
-## ❔ What is Apogee
+## What is Apogee
 I wanted a desktop radio player for the Satellite Radio channels that get included with IPTV services/found around the web.
 
 Apogee combines these streams with internet data to provide a beautiful player experience.
 
+## Features
+ - Mini Player - Use the + and - buttons to switch to the mini player, floating above the rest of your windows
+ - Recommendations - What you listen to and for how long drives recomendations for other channels
+ - Favorite channels - See whats playing on all your favorite channels at a glace
+ - Track your favorite artists/tracks and get alerts when they are playing
+ - Light and Dark modes - Detected automatically or manually set
+ - Live visualizer that reacts to the playing music - Cause it looks cool
+ - Now Playing support - Integrates with your computer's now playing systems to show track info in the OS
+ - Live Sports scores - Take the place of track title on sports channels when a game is on
+ - Sirius XM metadata - Artist/Track/Album and more
+ - Automatic Updates - Get prompted when an update is available and update directly through the app
+
+
+## Screenshots
 ![Big Player](https://github.com/slamanna212/Apogee/blob/main/.github/assets/bigplayer.png?raw=true "Big Player")
 
 ![Medium Player](https://github.com/slamanna212/Apogee/blob/main/.github/assets/mediumplayer.png?raw=true "Medium Player")
+

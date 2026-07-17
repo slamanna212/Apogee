@@ -6,7 +6,7 @@ use std::sync::{Arc, OnceLock};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::Mutex;
+use tokio::sync::{oneshot, Mutex};
 
 /// Per-process IPC path (rather than a single fixed name) so a stale/
 /// abandoned socket from another instance can never collide with, or be
@@ -88,6 +88,21 @@ struct Inner {
 pub struct MpvState {
     inner: Arc<Mutex<Option<Inner>>>,
     stderr_tail: Arc<Mutex<VecDeque<String>>>,
+    // Holds the reply sink for an in-flight `mpv_list_audio_devices` call. The
+    // IPC read loop fulfills it when a message tagged with
+    // `LIST_AUDIO_DEVICES_REQUEST_ID` arrives, correlating the async reply
+    // without a full request-tracking table (same approach as
+    // `GET_PROPERTY_REQUEST_ID`, but request/response instead of event-stream).
+    pending_device_list: Arc<Mutex<Option<oneshot::Sender<Value>>>>,
+}
+
+/// One entry from mpv's `audio-device-list` property: `name` is what gets fed
+/// back to `set_property audio-device`, `description` is the human label.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct AudioDevice {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
 }
 
 /// Prefers a bundled mpv (Windows, Linux AppImage) over PATH lookup (Linux
@@ -480,6 +495,7 @@ async fn ensure_started(app: &AppHandle, state: &MpvState) -> Result<(), String>
     let app_clone = app.clone();
     let inner_for_reader = state.inner.clone();
     let stderr_tail_for_reader = state.stderr_tail.clone();
+    let pending_device_list_for_reader = state.pending_device_list.clone();
     tokio::spawn(async move {
         let mut reader = BufReader::new(read_half);
         loop {
@@ -493,6 +509,18 @@ async fn ensure_started(app: &AppHandle, state: &MpvState) -> Result<(), String>
             };
             match serde_json::from_str::<Value>(&line) {
                 Ok(value) => {
+                    // A reply to an in-flight mpv_list_audio_devices request is
+                    // routed straight back to that caller (and not re-emitted
+                    // as a UI event) - it's a one-off request/response, not
+                    // part of the mpv-event stream the frontend interprets.
+                    if value.get("request_id").and_then(Value::as_i64)
+                        == Some(LIST_AUDIO_DEVICES_REQUEST_ID)
+                    {
+                        if let Some(tx) = pending_device_list_for_reader.lock().await.take() {
+                            let _ = tx.send(value.get("data").cloned().unwrap_or(Value::Null));
+                            continue;
+                        }
+                    }
                     // Every message mpv sends over IPC (property changes,
                     // pause/unpause, playback-restart, end-file, etc.) - the
                     // none-observed properties this doesn't cover are the
@@ -632,6 +660,45 @@ pub async fn mpv_get_property(state: State<'_, MpvState>, name: String) -> Resul
         json!({ "command": ["get_property", name], "request_id": GET_PROPERTY_REQUEST_ID }),
     )
     .await
+}
+
+/// Fixed request_id for the `audio-device-list` read issued by
+/// `mpv_list_audio_devices`. Distinct from `GET_PROPERTY_REQUEST_ID` so its
+/// (array) reply is routed to the awaiting caller instead of the frontend's
+/// numeric-only get-reply handler.
+const LIST_AUDIO_DEVICES_REQUEST_ID: i64 = 778;
+
+/// Enumerates mpv's available audio output devices (name + description) so the
+/// frontend can offer an output-device picker. Ensures mpv is running (it's
+/// spawned idle on demand), then issues a one-off get_property whose reply the
+/// IPC read loop hands back through `pending_device_list`.
+#[tauri::command]
+pub async fn mpv_list_audio_devices(
+    app: AppHandle,
+    state: State<'_, MpvState>,
+) -> Result<Vec<AudioDevice>, String> {
+    ensure_started(&app, &state).await?;
+
+    let (tx, rx) = oneshot::channel();
+    *state.pending_device_list.lock().await = Some(tx);
+
+    send_command(
+        &state,
+        json!({ "command": ["get_property", "audio-device-list"], "request_id": LIST_AUDIO_DEVICES_REQUEST_ID }),
+    )
+    .await?;
+
+    let data = match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
+        Ok(Ok(data)) => data,
+        Ok(Err(_)) => return Err("audio device list request was cancelled".to_string()),
+        Err(_) => {
+            *state.pending_device_list.lock().await = None;
+            return Err("timed out reading audio device list from mpv".to_string());
+        }
+    };
+
+    serde_json::from_value(data)
+        .map_err(|e| format!("failed to parse audio device list: {e}"))
 }
 
 /// Exposes mpv's recent stderr output (already tracked in `stderr_tail` for

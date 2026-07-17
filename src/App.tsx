@@ -19,6 +19,7 @@ import { useAlertsStore } from './stores/alertsStore';
 import { useScrobblingStore } from './stores/scrobblingStore';
 import { useSleepTimerStore } from './stores/sleepTimerStore';
 import { setMediaMetadata } from './lib/mediaSession';
+import { setWaveformDevice } from './lib/waveform';
 import {
   discordRpcConnect,
   discordRpcDisconnect,
@@ -299,6 +300,17 @@ function AppContent() {
   useEffect(() => {
     if (settingsLoaded) {
       invoke('set_log_level', { verbose: settings.verboseLogging }).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsLoaded]);
+
+  // Point the visualizer at the saved output device from launch (its capture
+  // runs independently of playback). Changes made in Settings apply themselves;
+  // this only restores the persisted choice on startup.
+  useEffect(() => {
+    if (settingsLoaded) {
+      const device = settings.audioDevice;
+      void setWaveformDevice(device?.name ?? null, device?.description ?? null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsLoaded]);

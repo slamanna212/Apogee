@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Alert, Badge, Button, Group, Paper, PasswordInput, Select, Stack, Switch, Text, TextInput } from '@mantine/core';
+import { Alert, Badge, Button, Group, Loader, Paper, PasswordInput, Select, Stack, Switch, Text, TextInput } from '@mantine/core';
 import { IconBrandLastfm } from '@tabler/icons-react';
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
 import { useSettingsStore, type UpdateChannel } from '../stores/settingsStore';
+import { listAudioDevices, setProperty as mpvSetProperty, type AudioDevice } from '../lib/mpvClient';
+import { setWaveformDevice } from '../lib/waveform';
 import { useLibraryStore, type ThemeMode } from '../stores/libraryStore';
 import { useUpdateStore } from '../stores/updateStore';
 import { useAlertsStore } from '../stores/alertsStore';
@@ -98,6 +100,38 @@ export function Settings() {
 
   const [logExportStatus, setLogExportStatus] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle');
   const [logExportError, setLogExportError] = useState<string | null>(null);
+
+  const [audioDevices, setAudioDevices] = useState<AudioDevice[]>([]);
+  const [loadingAudioDevices, setLoadingAudioDevices] = useState(false);
+
+  // Enumerating spawns mpv idle, so only do it when the picker is actually
+  // opened rather than on every Settings visit. mpv's own "auto" entry is
+  // dropped in favor of the explicit "System default" option below.
+  async function loadAudioDevices() {
+    if (loadingAudioDevices) return;
+    setLoadingAudioDevices(true);
+    try {
+      setAudioDevices((await listAudioDevices()).filter((d) => d.name !== 'auto'));
+    } catch {
+      // Leave the list as-is; the stored selection (if any) still shows.
+    } finally {
+      setLoadingAudioDevices(false);
+    }
+  }
+
+  async function handleAudioDeviceChange(value: string | null) {
+    if (!value) {
+      await updateSettings({ audioDevice: null });
+      mpvSetProperty('audio-device', 'auto').catch(() => {});
+      void setWaveformDevice(null, null);
+      return;
+    }
+    const device = audioDevices.find((d) => d.name === value);
+    const selection = { name: value, description: device?.description ?? value };
+    await updateSettings({ audioDevice: selection });
+    mpvSetProperty('audio-device', selection.name).catch(() => {});
+    void setWaveformDevice(selection.name, selection.description);
+  }
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
@@ -225,6 +259,29 @@ export function Settings() {
             description="Applies to the expanded and collapsed mini player only, not the full window"
             checked={settings.keepMiniWindowOnTop}
             onChange={(e) => updateSettings({ keepMiniWindowOnTop: e.currentTarget.checked })}
+          />
+        </Card>
+
+        <Card title="Audio">
+          <Select
+            label="Output device"
+            description="Where audio plays, and the source the visualizer listens to"
+            placeholder="System default"
+            data={[
+              { value: '', label: 'System default' },
+              // Surface the saved device even before the list has loaded so it
+              // shows its label instead of a bare id on first open.
+              ...(settings.audioDevice && !audioDevices.some((d) => d.name === settings.audioDevice!.name)
+                ? [{ value: settings.audioDevice.name, label: settings.audioDevice.description || settings.audioDevice.name }]
+                : []),
+              ...audioDevices.map((d) => ({ value: d.name, label: d.description || d.name })),
+            ]}
+            value={settings.audioDevice?.name ?? ''}
+            onChange={handleAudioDeviceChange}
+            onDropdownOpen={() => { if (audioDevices.length === 0) void loadAudioDevices(); }}
+            rightSection={loadingAudioDevices ? <Loader size="xs" /> : undefined}
+            allowDeselect={false}
+            searchable
           />
         </Card>
 

@@ -213,7 +213,14 @@ fn teardown(handles: TeardownHandles) {
     }
 }
 
-pub(super) async fn open_macos_capture_source() -> io::Result<CaptureSource> {
+pub(super) async fn open_macos_capture_source(
+    _selected: Option<super::SelectedAudioDevice>,
+) -> io::Result<CaptureSource> {
+    // The selected device is intentionally ignored here: this is a *global*
+    // process tap (see build_tap_description) that captures all system audio
+    // regardless of which output device it's routed to, so it already follows
+    // mpv wherever the user points its output. Device selection therefore only
+    // needs to change mpv's output on macOS, not this capture.
     if !macos_supports_process_tap() {
         return Err(io::Error::new(
             ErrorKind::Unsupported,

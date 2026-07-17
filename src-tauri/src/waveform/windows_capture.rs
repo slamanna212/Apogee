@@ -1,4 +1,4 @@
-use super::CaptureSource;
+use super::{CaptureSource, SelectedAudioDevice};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
 use std::io::{self, ErrorKind};
@@ -11,15 +11,28 @@ use tokio::sync::mpsc;
 /// WASAPI backend: passing the *default output* device to
 /// `build_input_stream` transparently sets `AUDCLNT_STREAMFLAGS_LOOPBACK`,
 /// so no raw WASAPI/COM bindings are needed here.
-pub(super) async fn open_windows_capture_source() -> io::Result<CaptureSource> {
+pub(super) async fn open_windows_capture_source(
+    selected: Option<SelectedAudioDevice>,
+) -> io::Result<CaptureSource> {
     let host = cpal::default_host();
-    let device = host
-        .default_output_device()
-        .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "no default audio output device"))?;
+    // Loopback captures whatever the *output* device is playing, so to follow
+    // the user's selection the capture device must be that same output device.
+    // cpal identifies devices by their friendly name, which matches mpv's
+    // `description`; fall back to the default output for "system default" or if
+    // the named device isn't currently present.
+    let device = selected
+        .as_ref()
+        .and_then(|dev| {
+            host.output_devices().ok().and_then(|mut devices| {
+                devices.find(|d| d.name().ok().as_deref() == Some(dev.description.as_str()))
+            })
+        })
+        .or_else(|| host.default_output_device())
+        .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "no audio output device"))?;
     let device_name = device
         .name()
         .unwrap_or_else(|_| "unknown device".to_string());
-    log::info!("waveform: opening WASAPI loopback on default output device '{device_name}'");
+    log::info!("waveform: opening WASAPI loopback on output device '{device_name}'");
 
     let config = device
         .default_output_config()

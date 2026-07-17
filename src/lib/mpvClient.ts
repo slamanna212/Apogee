@@ -39,6 +39,17 @@ export function getProperty(name: string): Promise<void> {
   return invoke('mpv_get_property', { name });
 }
 
+export interface AudioDevice {
+  name: string;
+  description: string;
+}
+
+// Enumerates mpv's available output devices. Spawns mpv idle on demand if it
+// isn't already running, so it can be called before any playback has started.
+export function listAudioDevices(): Promise<AudioDevice[]> {
+  return invoke('mpv_list_audio_devices');
+}
+
 export function getStderrTail(): Promise<string> {
   return invoke('mpv_get_stderr_tail');
 }

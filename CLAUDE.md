@@ -13,9 +13,9 @@ Apogee is a Tauri (Rust + React/TypeScript) desktop app that acts as a radio tun
 - `npm run build` — typecheck (`tsc -b`) + Vite production build of the frontend
 - `npm run tauri build` — full native app bundle
 - `npm run lint` — oxlint over the frontend
+- `npm test` — vitest run over the frontend (`src/**/*.test.ts`, colocated with the code under test)
 - `cargo build` / `cargo check` (run from `src-tauri/`) — build/check the Rust backend directly
-
-There is no test suite (no test runner configured in `package.json`, no `#[test]` usage found) and no `npm test` script — don't assume one exists.
+- `cargo test` (run from `src-tauri/`) — Rust unit tests (`#[cfg(test)]` modules in `lastfm.rs`, `notifications.rs`)
 
 Requires the `mpv` binary on `PATH` at runtime; the Rust side spawns it as a subprocess and talks to it over a local IPC socket (`/tmp/apogee-mpv.sock` on Unix, a named pipe on Windows).
 

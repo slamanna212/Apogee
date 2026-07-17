@@ -10,6 +10,14 @@ export interface ScrobblingSettings {
   };
 }
 
+/** A chosen audio output device. `name` is mpv's `audio-device-list` name
+ *  (the shared identity used for both playback and the visualizer); `description`
+ *  is its friendly label. `null` in settings means "system default". */
+export interface AudioDeviceSelection {
+  name: string;
+  description: string;
+}
+
 export interface Settings {
   baseUrl: string;
   username: string;
@@ -25,6 +33,7 @@ export interface Settings {
   discordRpcEnabled: boolean;
   scrobbling: ScrobblingSettings;
   lastSleepTimerMinutes: number;
+  audioDevice: AudioDeviceSelection | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -42,6 +51,7 @@ export const DEFAULT_SETTINGS: Settings = {
   discordRpcEnabled: false,
   scrobbling: { lastfm: { enabled: false } },
   lastSleepTimerMinutes: 30,
+  audioDevice: null,
 };
 
 type PersistedSettings = Omit<Settings, 'password'>;

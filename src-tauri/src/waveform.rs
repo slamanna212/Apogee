@@ -7,7 +7,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 const WINDOW_SIZE: usize = 1024;
 /// 8 bands, log-spaced across the audible range.
@@ -162,6 +162,41 @@ impl LevelSmoother {
 
 static STARTED: OnceLock<()> = OnceLock::new();
 
+/// The audio device the visualizer should capture, kept in lockstep with the
+/// device mpv plays to so the bars react to the audio the user actually hears.
+/// `name` is mpv's `audio-device-list` name (the shared identity across
+/// playback and capture); `description` is its friendly label, needed to match
+/// the device on Windows via cpal. `None` means "system default".
+#[derive(Clone, Debug)]
+pub struct SelectedAudioDevice {
+    pub name: String,
+    // Only read by the Windows opener (to match the cpal output device by its
+    // friendly name); Linux derives everything from `name` and macOS ignores
+    // the selection, so this is dead code on those targets.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub description: String,
+}
+
+/// Set once in `ensure_started`; `waveform_set_device` pushes new selections
+/// through it and `run_capture_loop` reopens capture on the new target.
+static WAVEFORM_DEVICE: OnceLock<watch::Sender<Option<SelectedAudioDevice>>> = OnceLock::new();
+
+/// Points the visualizer at a specific output device (or `None` for the system
+/// default). Applied live - the capture loop tears down the current source and
+/// reopens against the new device without restarting playback.
+#[tauri::command]
+pub fn waveform_set_device(name: Option<String>, description: Option<String>) {
+    let selected = name.map(|name| SelectedAudioDevice {
+        name,
+        description: description.unwrap_or_default(),
+    });
+    if let Some(tx) = WAVEFORM_DEVICE.get() {
+        // The only receiver lives in run_capture_loop for the app's lifetime;
+        // a send error would just mean capture never started, nothing to do.
+        let _ = tx.send(selected);
+    }
+}
+
 /// Starts a real-time spectrum analyzer once per app lifetime: captures
 /// system audio output directly (not mpv's internal state - mpv's own
 /// af-metadata mechanism was tested and cannot expose more than one overall
@@ -176,11 +211,16 @@ pub fn ensure_started(app: &AppHandle) {
         return;
     }
     let app = app.clone();
+    // Create the device channel before the loop starts so waveform_set_device
+    // (which may fire as soon as the frontend finishes loading settings) always
+    // has a live sender to push through.
+    let (device_tx, device_rx) = watch::channel(None);
+    let _ = WAVEFORM_DEVICE.set(device_tx);
     // tokio::spawn requires an active Tokio task context; ensure_started is
     // called from Tauri's synchronous .setup() closure, so it must go through
     // Tauri's own runtime handle instead.
     tauri::async_runtime::spawn(async move {
-        run_capture_loop(app).await;
+        run_capture_loop(app, device_rx).await;
     });
 }
 
@@ -194,10 +234,14 @@ struct CaptureSource {
     backend_name: &'static str,
 }
 
-async fn run_capture_loop(app: AppHandle) {
+async fn run_capture_loop(
+    app: AppHandle,
+    mut device_rx: watch::Receiver<Option<SelectedAudioDevice>>,
+) {
     let mut backoff = RetryBackoff::new();
     loop {
-        match open_capture_source().await {
+        let selected = device_rx.borrow().clone();
+        match open_capture_source(selected).await {
             Ok(CaptureSource {
                 rx,
                 sample_rate,
@@ -205,8 +249,21 @@ async fn run_capture_loop(app: AppHandle) {
             }) => {
                 log::info!("waveform: capturing via {backend_name} at {sample_rate}Hz");
                 backoff.reset();
-                process_samples(&app, rx, sample_rate).await;
-                log::warn!("waveform: capture source ({backend_name}) ended, retrying");
+                // Run until the source ends on its own, or the selected device
+                // changes - in which case drop this source (killing the capture
+                // process/stream) and immediately reopen against the new target,
+                // skipping the retry backoff.
+                tokio::select! {
+                    _ = process_samples(&app, rx, sample_rate) => {
+                        log::warn!("waveform: capture source ({backend_name}) ended, retrying");
+                    }
+                    changed = device_rx.changed() => {
+                        if changed.is_ok() {
+                            log::info!("waveform: audio device changed, reopening capture");
+                            continue;
+                        }
+                    }
+                }
             }
             Err(e) => {
                 log::warn!(
@@ -253,21 +310,24 @@ async fn process_samples(app: &AppHandle, mut rx: mpsc::Receiver<Vec<f32>>, samp
     }
 }
 
-async fn open_capture_source() -> std::io::Result<CaptureSource> {
+async fn open_capture_source(
+    selected: Option<SelectedAudioDevice>,
+) -> std::io::Result<CaptureSource> {
     #[cfg(target_os = "linux")]
     {
-        open_linux_capture_source().await
+        open_linux_capture_source(selected).await
     }
     #[cfg(target_os = "windows")]
     {
-        open_windows_capture_source().await
+        open_windows_capture_source(selected).await
     }
     #[cfg(target_os = "macos")]
     {
-        open_macos_capture_source().await
+        open_macos_capture_source(selected).await
     }
     #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     {
+        let _ = selected;
         Err(std::io::Error::new(
             ErrorKind::Unsupported,
             "audio loopback capture not implemented on this OS",
@@ -278,12 +338,30 @@ async fn open_capture_source() -> std::io::Result<CaptureSource> {
 const LINUX_SAMPLE_RATE: u32 = 44100;
 
 #[cfg(target_os = "linux")]
-async fn spawn_capture_process() -> std::io::Result<(Child, &'static str)> {
+async fn spawn_capture_process(
+    selected: Option<SelectedAudioDevice>,
+) -> std::io::Result<(Child, &'static str)> {
+    // On PipeWire/PulseAudio, mpv's `pulse/<sink>` device name is exactly the
+    // sink name, and that sink's monitor is `<sink>.monitor` - so a selected
+    // device maps cleanly onto pw-record's `--target` and parec's `--device`.
+    // For "system default" (None) or a non-pulse mpv AO (e.g. raw ALSA, whose
+    // name doesn't carry a pulse sink), fall back to the default sink monitor.
+    let (pw_target, parec_device) = match &selected {
+        Some(dev) if dev.name.starts_with("pulse/") => {
+            let sink = dev.name.trim_start_matches("pulse/");
+            (format!("--target={sink}"), format!("--device={sink}.monitor"))
+        }
+        _ => (
+            "--target=@DEFAULT_AUDIO_SINK@".to_string(),
+            "--device=@DEFAULT_SINK@.monitor".to_string(),
+        ),
+    };
+
     // This app's own dev/test environment runs PipeWire (pw-record); classic
     // PulseAudio-only systems get parec as a fallback.
     let pw_record = Command::new("pw-record")
         .args([
-            "--target=@DEFAULT_AUDIO_SINK@",
+            &pw_target,
             "--media-category=Capture",
             "--media-role=Music",
             &format!("--rate={LINUX_SAMPLE_RATE}"),
@@ -301,7 +379,7 @@ async fn spawn_capture_process() -> std::io::Result<(Child, &'static str)> {
         Ok(child) => Ok((child, "pw-record")),
         Err(e) if e.kind() == ErrorKind::NotFound => Command::new("parec")
             .args([
-                "--device=@DEFAULT_SINK@.monitor",
+                &parec_device,
                 &format!("--rate={LINUX_SAMPLE_RATE}"),
                 "--format=s16le",
                 "--channels=1",
@@ -317,8 +395,10 @@ async fn spawn_capture_process() -> std::io::Result<(Child, &'static str)> {
 }
 
 #[cfg(target_os = "linux")]
-async fn open_linux_capture_source() -> std::io::Result<CaptureSource> {
-    let (mut child, backend_name) = spawn_capture_process().await?;
+async fn open_linux_capture_source(
+    selected: Option<SelectedAudioDevice>,
+) -> std::io::Result<CaptureSource> {
+    let (mut child, backend_name) = spawn_capture_process(selected).await?;
     let Some(mut stdout) = child.stdout.take() else {
         return Err(std::io::Error::other(
             "pw-record/parec spawned without a stdout pipe",
