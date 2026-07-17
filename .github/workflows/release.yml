@@ -124,7 +124,7 @@ jobs:
               --title "Release $TAG" --notes "Full changelogs on GitHub." \
               --target "$(git rev-parse HEAD)" --repo "${{ github.repository }}"
           fi
-          RELEASE_ID=$(gh release view "$TAG" --repo "${{ github.repository }}" --json databaseId --jq .databaseId)
+          RELEASE_ID=$(gh api "repos/${{ github.repository }}/releases/tags/$TAG" --jq .id)
           echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
 
   build:
