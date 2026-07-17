@@ -6,6 +6,7 @@ import { debug as logDebug } from '@tauri-apps/plugin-log';
 import { ChannelCard, CHANNEL_CARD_MIN_WIDTH, CHANNEL_CARD_GAP } from './ChannelCard';
 import { ChannelListRow } from './ChannelListRow';
 import { JumpRail } from './JumpRail';
+import { channelMatchesSearch } from '../lib/channelSearch';
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel, StellarStation } from '../types/stellarTunerLog';
 import type { SortMode, ViewMode } from '../stores/libraryStore';
@@ -60,12 +61,14 @@ export function ChannelGrid({
   const filtered = useMemo(() => {
     const q = debouncedSearchTerm.trim().toLowerCase();
     if (!q) return channels;
-    return channels.filter((c) => {
-      const name = (channelMetadata.get(c.stream_id)?.marketing_name || c.name).toLowerCase();
-      if (name.includes(q)) return true;
-      const station = nowPlaying?.get(c.stream_id);
-      return !!station && (station.title.toLowerCase().includes(q) || station.artist.toLowerCase().includes(q));
-    });
+    return channels.filter((channel) =>
+      channelMatchesSearch(
+        channel,
+        channelMetadata.get(channel.stream_id),
+        nowPlaying?.get(channel.stream_id),
+        q,
+      ),
+    );
   }, [channels, channelMetadata, debouncedSearchTerm, nowPlaying]);
 
   useEffect(() => {
