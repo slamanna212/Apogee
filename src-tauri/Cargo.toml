@@ -29,12 +29,12 @@ serde = { version = "=1.0.228", features = ["derive"] }
 log = "=0.4.33"
 tauri = { version = "=2.11.5", features = ["macos-private-api"] }
 tauri-plugin-log = "=2.9.0"
-tauri-plugin-dialog = "=2.7.1"
+tauri-plugin-dialog = "=2.7.2"
 tauri-plugin-http = "=2.5.9"
-tauri-plugin-store = "=2.4.3"
+tauri-plugin-store = "=2.4.4"
 tauri-plugin-updater = "=2.10.1"
 tauri-plugin-process = "=2.3.1"
-tauri-plugin-opener = "=2.5.3"
+tauri-plugin-opener = "=2.5.4"
 tokio = { version = "=1.52.3", features = ["process", "net", "io-util", "rt", "time", "macros", "sync", "fs"] }
 souvlaki = "=0.8.3"
 discord-rich-presence = "=1.1.0"
