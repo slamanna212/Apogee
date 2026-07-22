@@ -1,4 +1,4 @@
-use discord_rich_presence::activity::{Activity, Assets, Button};
+use discord_rich_presence::activity::{Activity, ActivityType, Assets, Button, StatusDisplayType};
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
 use std::sync::{Arc, Mutex};
 use tauri::State;
@@ -61,6 +61,8 @@ pub async fn discord_rpc_set_activity(
         let mut activity = Activity::new()
             .details(&details)
             .assets(assets)
+            .activity_type(ActivityType::Listening)
+            .status_display_type(StatusDisplayType::State)
             .buttons(vec![Button::new("View on GitHub", GITHUB_URL)]);
         if let Some(s) = activity_state.as_deref().filter(|s| !s.is_empty()) {
             activity = activity.state(s);
