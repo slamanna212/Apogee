@@ -120,6 +120,12 @@ body,
   position: relative;
   isolation: isolate;
   overflow: hidden;
+  /* Overrides .apogee-glass's flat shadow with a layered one (tight contact
+     shadow + soft ambient falloff) that fully fades out within
+     RAIL_SHADOW_GUTTER (see App.tsx) instead of getting hard-clipped by the
+     transparent window's edge. Reads as the rail floating above whatever is
+     beneath it rather than a shadow with a visible cutoff. */
+  box-shadow: var(--app-shadow-rail), inset 0 1px 0 var(--app-glass-highlight);
   transition: border-radius 180ms ease, box-shadow 180ms ease;
 }
 

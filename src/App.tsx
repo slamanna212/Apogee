@@ -59,10 +59,19 @@ const NAV_ITEMS: { page: Page; label: string; icon: typeof IconHome2 }[] = [
 const COMPACT_BREAKPOINT = 900;
 const CARD_WIDTH = 1180;
 const CARD_HEIGHT = 760;
-/** Half of the expanded bar's footprint - how far the card's bottom edge sits above the window's bottom, so the bar can overlap it. */
-const BAR_OVERLAP = 50;
-const EXPANDED_BAR_SIZE = { width: 900, height: 100 };
-const COLLAPSED_BAR_SIZE = { width: 340, height: 80 };
+const RAIL_SHADOW_GUTTER = 24;
+const EXPANDED_RAIL_SIZE = { width: 700, height: 84 };
+const COLLAPSED_RAIL_SIZE = { width: 300, height: 56 };
+const EXPANDED_BAR_SIZE = {
+  width: EXPANDED_RAIL_SIZE.width + RAIL_SHADOW_GUTTER * 2,
+  height: EXPANDED_RAIL_SIZE.height + RAIL_SHADOW_GUTTER * 2,
+};
+const COLLAPSED_BAR_SIZE = {
+  width: COLLAPSED_RAIL_SIZE.width + RAIL_SHADOW_GUTTER * 2,
+  height: COLLAPSED_RAIL_SIZE.height + RAIL_SHADOW_GUTTER * 2,
+};
+/** Align the expanded rail's center with the browser card's bottom edge. */
+const BAR_OVERLAP = EXPANDED_RAIL_SIZE.height / 2 + RAIL_SHADOW_GUTTER;
 
 const LASTFM_PROVIDER_CLIENT: ScrobbleProviderClient = {
   id: 'lastfm',
@@ -513,7 +522,10 @@ function AppContent() {
         width: '100%',
         height: '100%',
         overflow: 'hidden',
-        borderRadius: browserOpen ? 26 : 999,
+        // The transport surface owns the mini-player's capsule shape. Applying
+        // another extreme radius here clips the surface asymmetrically and can
+        // cover controls near the right edge.
+        borderRadius: browserOpen ? 26 : 0,
         transform: 'translateZ(0)',
       }}
     >
@@ -660,7 +672,17 @@ function AppContent() {
       )}
 
       {!onboardingActive && (
-        <div style={{ position: 'absolute', left: '50%', bottom: 0, transform: 'translateX(-50%)', zIndex: 10 }}>
+        <div
+          style={{
+            position: 'absolute',
+            left: '50%',
+            bottom: RAIL_SHADOW_GUTTER,
+            width: barMode === 'expanded' ? EXPANDED_RAIL_SIZE.width : COLLAPSED_RAIL_SIZE.width,
+            height: barMode === 'expanded' ? EXPANDED_RAIL_SIZE.height : COLLAPSED_RAIL_SIZE.height,
+            transform: 'translateX(-50%)',
+            zIndex: 10,
+          }}
+        >
           <TransportBar
             mode={barMode}
             status={playerStatus}

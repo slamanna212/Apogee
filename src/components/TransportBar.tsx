@@ -559,7 +559,7 @@ function CollapsedInfo({
 }) {
   if (!currentChannel) {
     return (
-      <Text data-tauri-drag-region size="xs" c="dimmed" style={{ flex: 'none', maxWidth: 150, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+      <Text data-tauri-drag-region size="xs" c="dimmed" style={{ flex: '1 1 auto', maxWidth: 150, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
         Select a channel
       </Text>
     );
@@ -569,7 +569,7 @@ function CollapsedInfo({
   const subtitle = status === 'loading' ? 'Connecting…' : isBuffering && status === 'playing' ? 'Buffering…' : nowPlaying?.artist;
 
   return (
-    <div data-tauri-drag-region style={{ flex: 'none', maxWidth: 150, minWidth: 0 }} title={status === 'error' ? errorMessage ?? undefined : undefined}>
+    <div data-tauri-drag-region style={{ flex: '1 1 auto', maxWidth: 150, minWidth: 0 }} title={status === 'error' ? errorMessage ?? undefined : undefined}>
       <div
         data-tauri-drag-region
         style={{
@@ -654,11 +654,11 @@ export function TransportBar({
             display: 'flex',
             alignItems: 'center',
             gap: 10,
-            height: 56,
+            width: '100%',
+            height: '100%',
+            boxSizing: 'border-box',
             padding: '0 10px',
             borderRadius: 999,
-            width: 'fit-content',
-            margin: '12px auto',
           }}
         >
           <PlusMinus onPlus={onPlus} onMinus={onMinus} compact />
@@ -692,10 +692,11 @@ export function TransportBar({
           display: 'flex',
           alignItems: 'center',
           gap: 16,
-          height: 84,
+          width: '100%',
+          height: '100%',
+          boxSizing: 'border-box',
           padding: '0 14px 0 10px',
           borderRadius: 999,
-          margin: 8,
         }}
       >
         <PlusMinus onPlus={onPlus} onMinus={onMinus} />
