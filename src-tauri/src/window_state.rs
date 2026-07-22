@@ -11,11 +11,13 @@ fn set_platform_window_bounds(
     width: u32,
     height: u32,
 ) -> Result<(), String> {
+    use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{
         SetWindowPos, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER,
     };
 
-    let hwnd = window.hwnd().map_err(|error| error.to_string())?;
+    let tauri_hwnd = window.hwnd().map_err(|error| error.to_string())?;
+    let hwnd = HWND(tauri_hwnd.0);
     unsafe {
         SetWindowPos(
             hwnd,

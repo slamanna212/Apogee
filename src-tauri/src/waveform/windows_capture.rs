@@ -24,20 +24,24 @@ pub(super) async fn open_windows_capture_source(
         .as_ref()
         .and_then(|dev| {
             host.output_devices().ok().and_then(|mut devices| {
-                devices.find(|d| d.name().ok().as_deref() == Some(dev.description.as_str()))
+                devices.find(|d| {
+                    d.description()
+                        .is_ok_and(|description| description.name() == dev.description)
+                })
             })
         })
         .or_else(|| host.default_output_device())
         .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "no audio output device"))?;
     let device_name = device
-        .name()
+        .description()
+        .map(|description| description.name().to_string())
         .unwrap_or_else(|_| "unknown device".to_string());
     log::info!("waveform: opening WASAPI loopback on output device '{device_name}'");
 
     let config = device
         .default_output_config()
         .map_err(|e| io::Error::other(format!("failed to read default output config: {e}")))?;
-    let sample_rate = config.sample_rate().0;
+    let sample_rate = config.sample_rate();
     let channels = config.channels() as usize;
     let sample_format = config.sample_format();
     let stream_config: cpal::StreamConfig = config.into();
@@ -52,14 +56,14 @@ pub(super) async fn open_windows_capture_source(
         // parks (with a periodic wakeup to check `stop`) for the stream's
         // entire lifetime instead of handing the stream off anywhere else.
         let err_fn_stop = stop.clone();
-        let err_fn = move |err: cpal::StreamError| {
+        let err_fn = move |err: cpal::Error| {
             log::warn!("waveform: WASAPI loopback stream error ({err}), stopping capture");
             err_fn_stop.store(true, Ordering::SeqCst);
         };
 
         let stream_result = match sample_format {
             SampleFormat::F32 => device.build_input_stream(
-                &stream_config,
+                stream_config,
                 {
                     let tx = tx.clone();
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
@@ -70,7 +74,7 @@ pub(super) async fn open_windows_capture_source(
                 None,
             ),
             SampleFormat::I16 => device.build_input_stream(
-                &stream_config,
+                stream_config,
                 {
                     let tx = tx.clone();
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
@@ -81,7 +85,7 @@ pub(super) async fn open_windows_capture_source(
                 None,
             ),
             SampleFormat::U16 => device.build_input_stream(
-                &stream_config,
+                stream_config,
                 {
                     let tx = tx.clone();
                     move |data: &[u16], _: &cpal::InputCallbackInfo| {
