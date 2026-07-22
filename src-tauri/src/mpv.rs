@@ -23,6 +23,11 @@ fn ipc_path() -> &'static str {
 }
 
 const STDERR_TAIL_LINES: usize = 40;
+const EQUALIZER_FREQUENCIES: [u32; 10] =
+    [31, 62, 125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000];
+const EQUALIZER_MIN_GAIN_DB: f64 = -12.0;
+const EQUALIZER_MAX_GAIN_DB: f64 = 12.0;
+const EQUALIZER_FILTER_LABEL: &str = "@apogee_eq";
 
 /// Caps applied to `read_bounded_line` so a malformed or hostile write to the
 /// mpv IPC socket/stderr pipe (see `ipc_path`'s doc comment for why the
@@ -651,6 +656,67 @@ pub async fn mpv_set_volume(state: State<'_, MpvState>, volume: u8) -> Result<()
     .await
 }
 
+/// Builds one labeled libavfilter graph containing the app's complete EQ.
+/// Keeping the ten bands inside one labeled mpv filter lets us replace/remove
+/// Apogee's EQ without disturbing audio filters from the user's mpv config.
+fn build_equalizer_filter(enabled: bool, gains: &[f64]) -> Result<Option<String>, String> {
+    if gains.len() != EQUALIZER_FREQUENCIES.len() {
+        return Err(format!(
+            "equalizer requires exactly {} bands",
+            EQUALIZER_FREQUENCIES.len()
+        ));
+    }
+    if gains.iter().any(|gain| {
+        !gain.is_finite() || !(EQUALIZER_MIN_GAIN_DB..=EQUALIZER_MAX_GAIN_DB).contains(gain)
+    }) {
+        return Err("equalizer gains must be finite values from -12 to +12 dB".to_string());
+    }
+    if !enabled || gains.iter().all(|gain| *gain == 0.0) {
+        return Ok(None);
+    }
+
+    let max_boost = gains.iter().copied().fold(0.0_f64, f64::max);
+    let mut filters = Vec::with_capacity(EQUALIZER_FREQUENCIES.len() + 1);
+    if max_boost > 0.0 {
+        // Pull the entire signal down by the largest boost so the shaped
+        // bands retain headroom instead of clipping at 0 dBFS.
+        filters.push(format!("volume=-{max_boost}dB"));
+    }
+    filters.extend(
+        EQUALIZER_FREQUENCIES
+            .iter()
+            .zip(gains)
+            .map(|(frequency, gain)| format!("equalizer=f={frequency}:t=o:w=1:g={gain}")),
+    );
+
+    Ok(Some(format!(
+        "{EQUALIZER_FILTER_LABEL}:lavfi=[{}]",
+        filters.join(",")
+    )))
+}
+
+#[tauri::command]
+pub async fn mpv_set_equalizer(
+    state: State<'_, MpvState>,
+    enabled: bool,
+    gains: Vec<f64>,
+) -> Result<(), String> {
+    let filter = build_equalizer_filter(enabled, &gains)?;
+
+    // `af remove` is harmless when the label is absent. Removing first avoids
+    // stacking filters after repeated slider changes while preserving every
+    // non-Apogee filter in mpv's chain.
+    send_command(
+        &state,
+        json!({ "command": ["af", "remove", EQUALIZER_FILTER_LABEL] }),
+    )
+    .await?;
+    if let Some(filter) = filter {
+        send_command(&state, json!({ "command": ["af", "add", filter] })).await?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn mpv_set_property(state: State<'_, MpvState>, name: String, value: Value) -> Result<(), String> {
     send_command(&state, json!({ "command": ["set_property", name, value] })).await
@@ -714,4 +780,34 @@ pub async fn mpv_list_audio_devices(
 #[tauri::command]
 pub async fn mpv_get_stderr_tail(state: State<'_, MpvState>) -> Result<String, String> {
     Ok(stderr_tail_string(&state.stderr_tail).await)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn equalizer_filter_is_labeled_and_adds_automatic_headroom() {
+        let filter =
+            build_equalizer_filter(true, &[6.0, 5.0, 4.0, 2.0, 0.0, -1.0, -1.0, 0.0, 0.0, 0.0])
+                .unwrap()
+                .unwrap();
+
+        assert!(filter.starts_with("@apogee_eq:lavfi=[volume=-6dB,"));
+        assert!(filter.contains("equalizer=f=31:t=o:w=1:g=6"));
+        assert!(filter.contains("equalizer=f=16000:t=o:w=1:g=0"));
+    }
+
+    #[test]
+    fn disabled_or_flat_equalizer_needs_no_filter() {
+        assert_eq!(build_equalizer_filter(false, &[2.0; 10]).unwrap(), None);
+        assert_eq!(build_equalizer_filter(true, &[0.0; 10]).unwrap(), None);
+    }
+
+    #[test]
+    fn equalizer_rejects_bad_band_counts_and_gains() {
+        assert!(build_equalizer_filter(true, &[0.0; 9]).is_err());
+        assert!(build_equalizer_filter(true, &[13.0; 10]).is_err());
+        assert!(build_equalizer_filter(true, &[f64::NAN; 10]).is_err());
+    }
 }

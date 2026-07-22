@@ -1,16 +1,25 @@
-import { useEffect, useState } from 'react';
-import { Alert, Badge, Button, Group, Loader, Paper, PasswordInput, Select, Stack, Switch, Text, TextInput } from '@mantine/core';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Badge, Button, Group, Loader, Paper, PasswordInput, Select, Slider, Stack, Switch, Text, TextInput } from '@mantine/core';
 import { IconBrandLastfm } from '@tabler/icons-react';
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
 import { useSettingsStore, type UpdateChannel } from '../stores/settingsStore';
-import { listAudioDevices, setProperty as mpvSetProperty, type AudioDevice } from '../lib/mpvClient';
+import { listAudioDevices, setEqualizer as mpvSetEqualizer, setProperty as mpvSetProperty, type AudioDevice } from '../lib/mpvClient';
+import {
+  detectEqualizerPreset,
+  EQUALIZER_BANDS,
+  EQUALIZER_PRESETS,
+  formatEqualizerBand,
+  type EqualizerPreset,
+  type EqualizerSettings,
+} from '../lib/equalizer';
 import { setWaveformDevice } from '../lib/waveform';
 import { useLibraryStore, type ThemeMode } from '../stores/libraryStore';
 import { useUpdateStore } from '../stores/updateStore';
 import { useAlertsStore } from '../stores/alertsStore';
 import { useScrobblingStore } from '../stores/scrobblingStore';
+import { usePlayerStore } from '../stores/playerStore';
 import { getLiveCategories } from '../lib/xtream';
 import type { XtreamCategory } from '../types/xtream';
 import logoUrl from '../assets/logo.svg';
@@ -24,6 +33,15 @@ const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
 const UPDATE_CHANNEL_OPTIONS: { value: UpdateChannel; label: string }[] = [
   { value: 'stable', label: 'Stable' },
   { value: 'beta', label: 'Beta (pre-releases)' },
+];
+
+const EQUALIZER_PRESET_OPTIONS: { value: Exclude<EqualizerPreset, 'custom'>; label: string }[] = [
+  { value: 'flat', label: 'Flat' },
+  { value: 'bass-boost', label: 'Bass Boost' },
+  { value: 'treble-boost', label: 'Treble Boost' },
+  { value: 'vocal', label: 'Vocal' },
+  { value: 'rock', label: 'Rock' },
+  { value: 'pop', label: 'Pop' },
 ];
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
@@ -84,6 +102,7 @@ export function Settings() {
   const beginLastFmConnection = useScrobblingStore((s) => s.beginLastFmConnection);
   const finishLastFmConnection = useScrobblingStore((s) => s.finishLastFmConnection);
   const disconnectLastFm = useScrobblingStore((s) => s.disconnectLastFm);
+  const hasSelectedChannel = usePlayerStore((s) => s.currentChannel !== null);
 
   const [baseUrl, setBaseUrl] = useState(settings.baseUrl);
   const [username, setUsername] = useState(settings.username);
@@ -103,6 +122,65 @@ export function Settings() {
 
   const [audioDevices, setAudioDevices] = useState<AudioDevice[]>([]);
   const [loadingAudioDevices, setLoadingAudioDevices] = useState(false);
+  const [equalizer, setEqualizerState] = useState<EqualizerSettings>(settings.equalizer);
+  const [equalizerError, setEqualizerError] = useState<string | null>(null);
+  const equalizerRef = useRef(equalizer);
+  const equalizerPreviewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingEqualizerPreview = useRef<EqualizerSettings | null>(null);
+
+  function applyEqualizer(next: EqualizerSettings) {
+    if (!hasSelectedChannel) return;
+    setEqualizerError(null);
+    mpvSetEqualizer(next.enabled, next.gains).catch((err) => {
+      setEqualizerError(err instanceof Error ? err.message : String(err));
+    });
+  }
+
+  function previewEqualizer(next: EqualizerSettings) {
+    pendingEqualizerPreview.current = next;
+    if (equalizerPreviewTimer.current) return;
+    equalizerPreviewTimer.current = setTimeout(() => {
+      equalizerPreviewTimer.current = null;
+      const pending = pendingEqualizerPreview.current;
+      pendingEqualizerPreview.current = null;
+      if (pending) applyEqualizer(pending);
+    }, 50);
+  }
+
+  function replaceEqualizer(next: EqualizerSettings, persist: boolean, preview = true) {
+    if (equalizerPreviewTimer.current) {
+      clearTimeout(equalizerPreviewTimer.current);
+      equalizerPreviewTimer.current = null;
+      pendingEqualizerPreview.current = null;
+    }
+    equalizerRef.current = next;
+    setEqualizerState(next);
+    if (preview) applyEqualizer(next);
+    if (persist) void updateSettings({ equalizer: next });
+  }
+
+  function handleEqualizerPreset(value: string | null) {
+    if (!value || value === 'custom') return;
+    const preset = value as Exclude<EqualizerPreset, 'custom'>;
+    replaceEqualizer({
+      enabled: equalizerRef.current.enabled,
+      preset,
+      gains: [...EQUALIZER_PRESETS[preset]],
+    }, true);
+  }
+
+  function handleEqualizerBand(index: number, gain: number, persist: boolean) {
+    const gains = [...equalizerRef.current.gains];
+    gains[index] = gain;
+    const next = { ...equalizerRef.current, preset: detectEqualizerPreset(gains), gains };
+    equalizerRef.current = next;
+    setEqualizerState(next);
+    if (persist) {
+      void updateSettings({ equalizer: next });
+    } else {
+      previewEqualizer(next);
+    }
+  }
 
   // Enumerating spawns mpv idle, so only do it when the picker is actually
   // opened rather than on every Settings visit. mpv's own "auto" entry is
@@ -137,6 +215,10 @@ export function Settings() {
     getVersion().then(setAppVersion).catch(() => {});
   }, []);
 
+  useEffect(() => () => {
+    if (equalizerPreviewTimer.current) clearTimeout(equalizerPreviewTimer.current);
+  }, []);
+
   async function handleCheckForUpdates() {
     setCheckedUpToDate(false);
     await checkForUpdates(settings.updateChannel);
@@ -169,6 +251,8 @@ export function Settings() {
     setUsername(settings.username);
     setPassword(settings.password);
     setCategoryId(settings.categoryId);
+    equalizerRef.current = settings.equalizer;
+    setEqualizerState(settings.equalizer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsLoaded]);
 
@@ -283,6 +367,79 @@ export function Settings() {
             allowDeselect={false}
             searchable
           />
+          <div style={{ borderTop: '1px solid var(--app-border)', margin: '8px 0 4px' }} />
+          <Group justify="space-between" align="center" wrap="nowrap">
+            <Switch
+              label="Equalizer"
+              description="Shape the sound across ten frequency bands"
+              checked={equalizer.enabled}
+              onChange={(event) => replaceEqualizer({
+                ...equalizerRef.current,
+                enabled: event.currentTarget.checked,
+              }, true)}
+            />
+            <Button
+              variant="subtle"
+              size="compact-sm"
+              disabled={equalizer.preset === 'flat'}
+              onClick={() => handleEqualizerPreset('flat')}
+            >
+              Reset
+            </Button>
+          </Group>
+          <Select
+            label="Preset"
+            data={[
+              ...EQUALIZER_PRESET_OPTIONS,
+              ...(equalizer.preset === 'custom' ? [{ value: 'custom', label: 'Custom' }] : []),
+            ]}
+            value={equalizer.preset}
+            onChange={handleEqualizerPreset}
+            disabled={!equalizer.enabled}
+            allowDeselect={false}
+          />
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(10, minmax(34px, 1fr))',
+              gap: 8,
+              overflowX: 'auto',
+              padding: '8px 2px 2px',
+            }}
+          >
+            {EQUALIZER_BANDS.map((frequency, index) => (
+              <div
+                key={frequency}
+                style={{ display: 'flex', minWidth: 34, flexDirection: 'column', alignItems: 'center', gap: 8 }}
+              >
+                <Text size="xs" c="dimmed" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {equalizer.gains[index] > 0 ? '+' : ''}{equalizer.gains[index]}
+                </Text>
+                <Slider
+                  orientation="vertical"
+                  h={150}
+                  min={-12}
+                  max={12}
+                  step={1}
+                  value={equalizer.gains[index]}
+                  onChange={(gain) => handleEqualizerBand(index, gain, false)}
+                  onChangeEnd={(gain) => handleEqualizerBand(index, gain, true)}
+                  disabled={!equalizer.enabled}
+                  label={(gain) => `${gain > 0 ? '+' : ''}${gain} dB`}
+                  aria-label={`${formatEqualizerBand(frequency)}Hz gain`}
+                />
+                <Text size="xs" fw={600}>{formatEqualizerBand(frequency)}</Text>
+              </div>
+            ))}
+          </div>
+          <Text size="xs" c="dimmed">
+            Frequencies are in Hz. Apogee automatically adds headroom when bands are boosted to help prevent clipping.
+          </Text>
+          {equalizerError && (
+            <Alert color="yellow" title="Couldn't apply the equalizer">
+              Playback will continue unchanged. {equalizerError}
+            </Alert>
+          )}
         </Card>
 
         <Card title="Discord">

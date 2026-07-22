@@ -10,6 +10,7 @@ import {
   onMpvEvent,
   stopPlayback,
   setProperty as mpvSetProperty,
+  setEqualizer as mpvSetEqualizer,
   setVolume as mpvSetVolume,
   setMute as mpvSetMute,
 } from '../lib/mpvClient';
@@ -146,12 +147,15 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
       // loads within a session, but reapply each connect so a device picked
       // while stopped, or a fresh mpv process, still honors it). Best-effort:
       // if the saved device is gone, let mpv keep its default rather than fail.
-      const audioDevice = useSettingsStore.getState().settings.audioDevice;
+      const { audioDevice, equalizer } = useSettingsStore.getState().settings;
       if (audioDevice) {
         await mpvSetProperty('audio-device', audioDevice.name).catch((err) => {
           logWarn(`could not apply audio device ${audioDevice.name}: ${err instanceof Error ? err.message : String(err)}`);
         });
       }
+      await mpvSetEqualizer(equalizer.enabled, equalizer.gains).catch((err) => {
+        logWarn(`could not apply equalizer: ${err instanceof Error ? err.message : String(err)}`);
+      });
       await mpvSetVolume(get().volume);
       if (get().muted) await mpvSetMute(true);
       // Status flips to 'playing' once mpv reports 'playback-restart' (see

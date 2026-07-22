@@ -45,6 +45,7 @@ pub fn run() {
             mpv::mpv_load,
             mpv::mpv_stop,
             mpv::mpv_set_volume,
+            mpv::mpv_set_equalizer,
             mpv::mpv_set_property,
             mpv::mpv_get_property,
             mpv::mpv_list_audio_devices,

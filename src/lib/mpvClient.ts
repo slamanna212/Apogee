@@ -27,6 +27,10 @@ export function setVolume(volume: number): Promise<void> {
   return invoke('mpv_set_volume', { volume });
 }
 
+export function setEqualizer(enabled: boolean, gains: readonly number[]): Promise<void> {
+  return invoke('mpv_set_equalizer', { enabled, gains });
+}
+
 export function setProperty(name: string, value: unknown): Promise<void> {
   return invoke('mpv_set_property', { name, value });
 }

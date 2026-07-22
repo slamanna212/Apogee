@@ -6,6 +6,7 @@ import {
   loadUrl,
   onMpvEvent,
   setMute as mpvSetMute,
+  setEqualizer as mpvSetEqualizer,
   setVolume as mpvSetVolume,
   stopPlayback,
 } from '../lib/mpvClient';
@@ -13,6 +14,10 @@ import { onMediaControlEvent, setMediaPlayback, setMediaVolume } from '../lib/me
 import { usePlayerStore } from './playerStore';
 
 const settingsUpdate = vi.hoisted(() => vi.fn());
+const mockSettings = vi.hoisted(() => ({
+  audioDevice: null as { name: string; description: string } | null,
+  equalizer: { enabled: false, preset: 'flat', gains: Array(10).fill(0) },
+}));
 
 vi.mock('@tauri-apps/plugin-log', () => ({
   debug: vi.fn(),
@@ -30,6 +35,7 @@ vi.mock('../lib/mpvClient', () => ({
   setProperty: vi.fn().mockResolvedValue(undefined),
   setVolume: vi.fn().mockResolvedValue(undefined),
   setMute: vi.fn().mockResolvedValue(undefined),
+  setEqualizer: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('../lib/mediaSession', () => ({
   onMediaControlEvent: vi.fn(),
@@ -40,7 +46,10 @@ vi.mock('../lib/waveform', () => ({
   setWaveformActive: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./settingsStore', () => ({
-  useSettingsStore: { getState: () => ({ update: settingsUpdate, settings: { audioDevice: null } }) },
+  useSettingsStore: { getState: () => ({
+    update: settingsUpdate,
+    settings: mockSettings,
+  }) },
 }));
 
 const creds: XtreamCredentials = {
@@ -75,6 +84,8 @@ beforeEach(() => {
   vi.clearAllTimers();
   vi.clearAllMocks();
   vi.mocked(getStderrTail).mockResolvedValue('');
+  mockSettings.audioDevice = null;
+  mockSettings.equalizer = { enabled: false, preset: 'flat', gains: Array(10).fill(0) };
   usePlayerStore.setState({
     status: 'idle',
     currentChannel: null,
@@ -95,9 +106,18 @@ describe('selectChannel', () => {
     await usePlayerStore.getState().selectChannel(channel, creds);
     expect(loadUrl).toHaveBeenCalledExactlyOnceWith(TS_URL);
     expect(mpvSetVolume).toHaveBeenCalledWith(80);
+    expect(mpvSetEqualizer).toHaveBeenCalledWith(false, Array(10).fill(0));
     expect(mpvSetMute).not.toHaveBeenCalled();
     expect(usePlayerStore.getState().status).toBe('loading');
     expect(usePlayerStore.getState().currentChannel).toBe(channel);
+  });
+
+  it('reapplies the saved equalizer when connecting', async () => {
+    mockSettings.equalizer = { enabled: true, preset: 'bass-boost', gains: [6, 5, 4, 2, 0, -1, -1, 0, 0, 0] };
+
+    await usePlayerStore.getState().selectChannel(channel, creds);
+
+    expect(mpvSetEqualizer).toHaveBeenCalledWith(true, mockSettings.equalizer.gains);
   });
 
   it('only flips to playing once mpv reports playback-restart', async () => {
