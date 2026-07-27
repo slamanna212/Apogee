@@ -23,7 +23,7 @@
     "@mantine/hooks": "9.4.1",
     "@mantine/notifications": "9.4.1",
     "@tabler/icons-react": "3.45.0",
-    "@tanstack/react-virtual": "^3.14.6",
+    "@tanstack/react-virtual": "^3.14.8",
     "@tauri-apps/api": "2.11.1",
     "@tauri-apps/plugin-dialog": "2.7.2",
     "@tauri-apps/plugin-http": "2.5.9",
