@@ -46,7 +46,7 @@ md5 = "=0.8.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "=3.6.3", features = ["sync-secret-service"] }
-libc = "=0.2.186"
+libc = "=0.2.189"
 notify-rust = "=4.18.0"
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -59,7 +59,7 @@ windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_UI_Windo
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "=3.6.3", features = ["apple-native"] }
 notify-rust = { version = "=4.18.0", features = ["preview-macos-un"] }
-libc = "=0.2.186"
+libc = "=0.2.189"
 objc2 = "=0.6.4"
 objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["NSWindow"] }
 objc2-foundation = { version = "=0.3.2", features = ["NSArray", "NSString", "NSObject"] }
