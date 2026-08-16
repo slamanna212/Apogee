@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Alert, Button, Group, PasswordInput, Select, Text, TextInput } from '@mantine/core';
+import { Alert, Button, Group, PasswordInput, Text, TextInput } from '@mantine/core';
 import type { Settings } from '../../stores/settingsStore';
 import { getLiveCategories } from '../../lib/xtream';
 import type { XtreamCategory } from '../../types/xtream';
 import { OnboardingCard } from './OnboardingCard';
+import { ChannelGroupSelector } from '../ChannelGroupSelector';
 
 interface XtreamSetupScreenProps {
   settings: Settings;
@@ -16,7 +17,7 @@ export function XtreamSetupScreen({ settings, onBack, onNext }: XtreamSetupScree
   const [username, setUsername] = useState(settings.username);
   const [password, setPassword] = useState(settings.password);
   const [categories, setCategories] = useState<XtreamCategory[]>([]);
-  const [categoryId, setCategoryId] = useState<string | null>(settings.categoryId);
+  const [categoryIds, setCategoryIds] = useState<string[]>(settings.categoryIds);
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
   const [testError, setTestError] = useState<string | null>(null);
 
@@ -34,13 +35,13 @@ export function XtreamSetupScreen({ settings, onBack, onNext }: XtreamSetupScree
   }
 
   function handleNext() {
-    const category = categories.find((c) => c.category_id === categoryId);
+    const names = categories.filter((c) => categoryIds.includes(c.category_id)).map((c) => c.category_name);
     onNext({
       baseUrl,
       username,
       password,
-      categoryId,
-      categoryName: category?.category_name ?? settings.categoryName,
+      categoryIds,
+      categoryNames: names.length > 0 ? names : settings.categoryNames,
     });
   }
 
@@ -75,22 +76,14 @@ export function XtreamSetupScreen({ settings, onBack, onNext }: XtreamSetupScree
             {testError}
           </Alert>
         )}
-        <Select
-          label="Channel group"
-          placeholder="Run Test connection to load groups"
-          data={categories.map((c) => ({ value: c.category_id, label: c.category_name }))}
-          value={categoryId}
-          onChange={setCategoryId}
-          disabled={categories.length === 0}
-          searchable
-        />
+        <ChannelGroupSelector categories={categories} value={categoryIds} onChange={setCategoryIds} />
       </OnboardingCard>
 
       <Group justify="space-between" w="100%" mt={4}>
         <Button variant="subtle" onClick={onBack}>
           Back
         </Button>
-        <Button onClick={handleNext} disabled={!categoryId}>
+        <Button onClick={handleNext} disabled={categoryIds.length === 0}>
           Next
         </Button>
       </Group>

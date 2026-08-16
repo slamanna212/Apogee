@@ -22,6 +22,7 @@ import { useScrobblingStore } from '../stores/scrobblingStore';
 import { usePlayerStore } from '../stores/playerStore';
 import { getLiveCategories } from '../lib/xtream';
 import type { XtreamCategory } from '../types/xtream';
+import { ChannelGroupSelector } from '../components/ChannelGroupSelector';
 import logoUrl from '../assets/logo.svg';
 
 const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
@@ -108,7 +109,7 @@ export function Settings() {
   const [username, setUsername] = useState(settings.username);
   const [password, setPassword] = useState(settings.password);
   const [categories, setCategories] = useState<XtreamCategory[]>([]);
-  const [categoryId, setCategoryId] = useState<string | null>(settings.categoryId);
+  const [categoryIds, setCategoryIds] = useState<string[]>(settings.categoryIds);
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
   const [testError, setTestError] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState<string | null>(null);
@@ -250,7 +251,7 @@ export function Settings() {
     setBaseUrl(settings.baseUrl);
     setUsername(settings.username);
     setPassword(settings.password);
-    setCategoryId(settings.categoryId);
+    setCategoryIds(settings.categoryIds);
     equalizerRef.current = settings.equalizer;
     setEqualizerState(settings.equalizer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -270,13 +271,13 @@ export function Settings() {
   }
 
   function handleSave() {
-    const category = categories.find((c) => c.category_id === categoryId);
+    const names = categories.filter((c) => categoryIds.includes(c.category_id)).map((c) => c.category_name);
     updateSettings({
       baseUrl,
       username,
       password,
-      categoryId,
-      categoryName: category?.category_name ?? settings.categoryName,
+      categoryIds,
+      categoryNames: names.length > 0 ? names : settings.categoryNames,
     });
   }
 
@@ -319,15 +320,7 @@ export function Settings() {
               {testError}
             </Alert>
           )}
-          <Select
-            label="Channel group"
-            placeholder="Run Test connection to load groups"
-            data={categories.map((c) => ({ value: c.category_id, label: c.category_name }))}
-            value={categoryId}
-            onChange={setCategoryId}
-            disabled={categories.length === 0}
-            searchable
-          />
+          <ChannelGroupSelector categories={categories} value={categoryIds} onChange={setCategoryIds} />
         </Card>
 
         <Card title="Appearance">
@@ -570,7 +563,7 @@ export function Settings() {
         </Card>
 
         <Group justify="flex-end">
-          <Button onClick={handleSave} disabled={!categoryId}>
+          <Button onClick={handleSave} disabled={categoryIds.length === 0}>
             Save
           </Button>
         </Group>
