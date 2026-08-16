@@ -23,8 +23,8 @@ export interface Settings {
   baseUrl: string;
   username: string;
   password: string;
-  categoryId: string | null;
-  categoryName: string | null;
+  categoryIds: string[];
+  categoryNames: string[];
   volume: number;
   updateChannel: UpdateChannel;
   keepMiniWindowOnTop: boolean;
@@ -42,8 +42,8 @@ export const DEFAULT_SETTINGS: Settings = {
   baseUrl: '',
   username: '',
   password: '',
-  categoryId: null,
-  categoryName: null,
+  categoryIds: [],
+  categoryNames: [],
   volume: 80,
   updateChannel: 'stable',
   keepMiniWindowOnTop: true,
@@ -103,10 +103,23 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await store.save();
     }
 
+    // Migrate the old singular categoryId/categoryName fields (pre-multi-select)
+    // into the new array shape so existing users keep seeing their channels.
+    const migratedCategoryIds = Array.isArray(stored.categoryIds)
+      ? (stored.categoryIds as string[])
+      : stored.categoryId
+        ? [stored.categoryId as string]
+        : DEFAULT_SETTINGS.categoryIds;
+    const migratedCategoryNames = Array.isArray(stored.categoryNames)
+      ? (stored.categoryNames as string[])
+      : stored.categoryName
+        ? [stored.categoryName as string]
+        : DEFAULT_SETTINGS.categoryNames;
+
     // Installs from before onboarding existed won't have onboardingComplete in
     // their stored settings - if they already have working Xtream config, treat
     // onboarding as already done rather than replaying it on their next launch.
-    const isPreOnboardingInstall = stored.onboardingComplete === undefined && !!stored.baseUrl && !!stored.username && !!stored.categoryId;
+    const isPreOnboardingInstall = stored.onboardingComplete === undefined && !!stored.baseUrl && !!stored.username && migratedCategoryIds.length > 0;
 
     // Carry over the old fixed "default volume" setting as the initial
     // remembered volume for installs that predate this being a live value.
@@ -116,6 +129,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       settings: {
         ...DEFAULT_SETTINGS,
         ...(stored as Partial<PersistedSettings>),
+        categoryIds: migratedCategoryIds,
+        categoryNames: migratedCategoryNames,
         volume: typeof stored.volume === 'number' ? stored.volume : (legacyDefaultVolume ?? DEFAULT_SETTINGS.volume),
         equalizer: normalizeEqualizerSettings(stored.equalizer),
         password: password ?? '',

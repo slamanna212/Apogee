@@ -342,13 +342,13 @@ function AppContent() {
   }, [settingsLoaded]);
 
   useEffect(() => {
-    if (settingsLoaded && settings.baseUrl && settings.username && settings.categoryId) {
+    if (settingsLoaded && settings.baseUrl && settings.username && settings.categoryIds.length > 0) {
       fetchChannels(
         { baseUrl: settings.baseUrl, username: settings.username, password: settings.password },
-        settings.categoryId,
+        settings.categoryIds,
       );
     }
-  }, [settingsLoaded, settings.baseUrl, settings.username, settings.password, settings.categoryId, fetchChannels]);
+  }, [settingsLoaded, settings.baseUrl, settings.username, settings.password, settings.categoryIds, fetchChannels]);
 
   useEffect(() => {
     if (!settingsLoaded || channels.length === 0) return;

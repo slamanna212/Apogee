@@ -60,7 +60,7 @@ interface ChannelState {
   channelMetadata: Map<number, StellarChannel>;
   metadataStatus: 'idle' | 'loading' | 'loaded' | 'error';
   pollFailureCount: number;
-  fetchChannels: (creds: XtreamCredentials, categoryId: string) => Promise<void>;
+  fetchChannels: (creds: XtreamCredentials, categoryIds: string[]) => Promise<void>;
   pollNowPlaying: (apiKey?: string) => Promise<void>;
   fetchChannelMetadata: () => Promise<void>;
 }
@@ -73,10 +73,15 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
   channelMetadata: new Map(),
   metadataStatus: 'idle',
   pollFailureCount: 0,
-  async fetchChannels(creds, categoryId) {
+  async fetchChannels(creds, categoryIds) {
     set({ status: 'loading', error: null });
     try {
-      const channels = await getLiveStreams(creds, categoryId);
+      const results = await Promise.all(categoryIds.map((id) => getLiveStreams(creds, id)));
+      const byStreamId = new Map<number, XtreamChannel>();
+      for (const list of results) {
+        for (const ch of list) byStreamId.set(ch.stream_id, ch);
+      }
+      const channels = Array.from(byStreamId.values());
       channels.sort((a, b) => a.num - b.num);
       set({ channels, status: 'loaded' });
     } catch (err) {
