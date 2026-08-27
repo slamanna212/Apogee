@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { Alert, Badge, Button, Group, Loader, Paper, PasswordInput, Select, Slider, Stack, Switch, Text, TextInput } from '@mantine/core';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Badge, Button, Group, Loader, Paper, PasswordInput, ScrollArea, Select, Slider, Stack, Switch, Table, Text, TextInput } from '@mantine/core';
 import { IconBrandLastfm } from '@tabler/icons-react';
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
@@ -20,6 +20,8 @@ import { useUpdateStore } from '../stores/updateStore';
 import { useAlertsStore } from '../stores/alertsStore';
 import { useScrobblingStore } from '../stores/scrobblingStore';
 import { usePlayerStore } from '../stores/playerStore';
+import { useChannelStore } from '../stores/channelStore';
+import { listUnmatchedChannels } from '../lib/channelMatcher';
 import { getLiveCategories } from '../lib/xtream';
 import type { XtreamCategory } from '../types/xtream';
 import { ChannelGroupSelector } from '../components/ChannelGroupSelector';
@@ -120,6 +122,14 @@ export function Settings() {
 
   const [logExportStatus, setLogExportStatus] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle');
   const [logExportError, setLogExportError] = useState<string | null>(null);
+
+  const channels = useChannelStore((s) => s.channels);
+  const channelMetadata = useChannelStore((s) => s.channelMetadata);
+  const metadataStatus = useChannelStore((s) => s.metadataStatus);
+  const unmatchedChannels = useMemo(
+    () => (metadataStatus === 'loaded' ? listUnmatchedChannels(channels, channelMetadata) : []),
+    [channels, channelMetadata, metadataStatus],
+  );
 
   const [audioDevices, setAudioDevices] = useState<AudioDevice[]>([]);
   const [loadingAudioDevices, setLoadingAudioDevices] = useState(false);
@@ -560,6 +570,50 @@ export function Settings() {
               {logExportError}
             </Alert>
           )}
+
+          <div>
+            <Text fw={600} size="sm">
+              Unmatched channels
+            </Text>
+            <Text size="xs" c="dimmed">
+              Channels whose name couldn't be matched to a StellarTunerLog station - they play fine, but show no
+              logo, categories or now-playing data. The parsed columns show what the matcher made of the name.
+            </Text>
+            {metadataStatus !== 'loaded' ? (
+              <Text size="sm" c="dimmed" mt={8}>
+                {metadataStatus === 'error'
+                  ? "Couldn't load the StellarTunerLog channel list."
+                  : 'Waiting for the StellarTunerLog channel list…'}
+              </Text>
+            ) : unmatchedChannels.length === 0 ? (
+              <Text size="sm" c="teal" mt={8}>
+                All {channels.length} channels matched
+              </Text>
+            ) : (
+              <ScrollArea.Autosize mah={280} mt={8}>
+                <Table striped withTableBorder stickyHeader fz="xs">
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Provider name</Table.Th>
+                      <Table.Th>Parsed name</Table.Th>
+                      <Table.Th>Parsed no.</Table.Th>
+                      <Table.Th>Stream ID</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {unmatchedChannels.map((entry) => (
+                      <Table.Tr key={entry.streamId}>
+                        <Table.Td>{entry.rawName}</Table.Td>
+                        <Table.Td>{entry.parsedName}</Table.Td>
+                        <Table.Td>{entry.parsedNumber ?? '—'}</Table.Td>
+                        <Table.Td>{entry.streamId}</Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea.Autosize>
+            )}
+          </div>
         </Card>
 
         <Group justify="flex-end">

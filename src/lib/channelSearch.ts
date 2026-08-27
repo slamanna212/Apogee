@@ -1,5 +1,6 @@
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel, StellarStation } from '../types/stellarTunerLog';
+import { channelDisplayName } from './channelDisplay';
 
 function searchableText(value: unknown): string {
   return typeof value === 'string' ? value.toLowerCase() : '';
@@ -17,8 +18,11 @@ export function channelMatchesSearch(
   station: StellarStation | undefined,
   normalizedQuery: string,
 ): boolean {
-  const channelName = searchableText(metadata?.marketing_name || channel.name);
-  if (channelName.includes(normalizedQuery)) return true;
+  // Both the raw provider name and the name actually shown, so a query still
+  // finds a channel by whatever the provider called it ("43 Rock The Bells")
+  // as well as by its displayed name.
+  if (searchableText(channel.name).includes(normalizedQuery)) return true;
+  if (searchableText(channelDisplayName(channel, metadata)).includes(normalizedQuery)) return true;
 
   return (
     searchableText(station?.title).includes(normalizedQuery) ||
