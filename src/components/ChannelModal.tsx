@@ -4,6 +4,7 @@ import { IconBrandFacebook, IconBrandTwitter, IconMail, IconPhone, IconStar, Ico
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel, StellarHistoryEntry } from '../types/stellarTunerLog';
 import { getHistory } from '../lib/stellarTunerLog';
+import { channelDisplayName } from '../lib/channelDisplay';
 import { ChannelArtwork } from './ChannelArtwork';
 
 interface ChannelModalProps {
@@ -78,7 +79,7 @@ export function ChannelModal({ channel, metadata, apiKey, isFavorite, onToggleFa
     }
   }
 
-  const name = metadata?.marketing_name || channel.name;
+  const name = channelDisplayName(channel, metadata);
   const description = metadata?.medium_description || metadata?.long_description || metadata?.streaming_name || '';
   const categories = [...(metadata?.categories ?? [])].sort((a, b) => a.order - b.order);
   const primary = categories.find((c) => c.is_primary);
