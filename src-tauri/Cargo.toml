@@ -35,7 +35,7 @@ tauri-plugin-store = "=2.4.4"
 tauri-plugin-updater = "=2.10.1"
 tauri-plugin-process = "=2.3.1"
 tauri-plugin-opener = "=2.5.4"
-tokio = { version = "=1.53.0", features = ["process", "net", "io-util", "rt", "time", "macros", "sync", "fs"] }
+tokio = { version = "=1.53.1", features = ["process", "net", "io-util", "rt", "time", "macros", "sync", "fs"] }
 souvlaki = "=0.8.3"
 discord-rich-presence = "=1.1.0"
 rustfft = "=6.4.1"
