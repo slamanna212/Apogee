@@ -3,9 +3,22 @@ mod lastfm;
 mod logs;
 mod media_session;
 mod mpv;
+// Shared networking foundation for the in-process audio engine (Symphonia
+// migration M1). Not wired into any Tauri command yet - nothing outside its
+// own tests calls it until M2 builds the playback engine on top of it, so
+// its public API is intentionally unused for now.
+#[allow(dead_code)]
+mod network;
 mod notifications;
+// Rust-native audio source pipeline (Symphonia migration M2), built on top
+// of `network`. Not wired into any Tauri command yet - nothing outside its
+// own tests calls it until M3 builds the controller on top of it.
+mod playback;
 mod secrets;
 mod updater;
+// Superseded by the engine's in-process PCM tap and no longer started. Retained
+// only so the migration can be reverted in one step; M5 deletes it along with MPV.
+#[allow(dead_code)]
 mod waveform;
 mod window_state;
 
@@ -40,8 +53,22 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(mpv::MpvState::default())
+        .manage(
+            playback::commands::PlayerState::new()
+                .expect("audio playback state should initialise"),
+        )
         .manage(discord_rpc::DiscordRpcState::default())
         .invoke_handler(tauri::generate_handler![
+            playback::commands::player_play,
+            playback::commands::player_stop,
+            playback::commands::player_set_volume,
+            playback::commands::player_set_muted,
+            playback::commands::player_set_equalizer,
+            playback::commands::player_list_devices,
+            playback::commands::player_set_device,
+            playback::commands::player_migrate_device,
+            playback::commands::player_set_visualizer,
+            playback::commands::player_get_snapshot,
             mpv::mpv_load,
             mpv::mpv_stop,
             mpv::mpv_set_volume,
@@ -103,10 +130,12 @@ pub fn run() {
                 app.manage(job);
             }
 
-            #[cfg(not(target_os = "macos"))]
-            waveform::ensure_started(&app.handle());
-            #[cfg(target_os = "macos")]
-            log::info!("startup: macOS waveform capture deferred until first playback");
+            // System-audio capture is no longer started. The spectrum visualizer now
+            // taps the playback engine's own PCM (post-EQ, post-volume), so capturing
+            // the machine's output is both unnecessary and less accurate - it picked up
+            // every other application too. The module is left in place until M5 removes
+            // it wholesale along with MPV.
+            log::info!("startup: spectrum uses the in-process PCM tap; audio capture disabled");
 
             match media_session::init(&app.handle()) {
                 Ok(controls) => {

@@ -19,7 +19,11 @@ import { useAlertsStore } from './stores/alertsStore';
 import { useScrobblingStore } from './stores/scrobblingStore';
 import { useSleepTimerStore } from './stores/sleepTimerStore';
 import { setMediaMetadata } from './lib/mediaSession';
-import { setWaveformDevice } from './lib/waveform';
+import {
+  setDevice as setPlayerDevice,
+  setVolume as setPlayerVolume,
+  setEqualizer as setPlayerEqualizer,
+} from './lib/playerClient';
 import {
   discordRpcConnect,
   discordRpcDisconnect,
@@ -312,13 +316,21 @@ function AppContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsLoaded]);
 
-  // Point the visualizer at the saved output device from launch (its capture
-  // runs independently of playback). Changes made in Settings apply themselves;
-  // this only restores the persisted choice on startup.
+  // The visualizer no longer needs pointing at a device: it taps the engine's own
+  // output, so it follows whichever device playback is using automatically.
+
+  // Restore persisted output settings on the player engine itself. Unlike the
+  // old mpv subprocess (reconfigured on every connect), the Symphonia/CPAL
+  // engine's output stage is long-lived, so these are pushed once at startup
+  // rather than per playback attempt (see src/stores/playerStore.ts). A
+  // legacy MPV device selection was already migrated (to system default, with
+  // an explanation surfaced in Settings) by settingsStore.load() before
+  // settingsLoaded flips true - see src/stores/settingsStore.ts.
   useEffect(() => {
     if (settingsLoaded) {
-      const device = settings.audioDevice;
-      void setWaveformDevice(device?.name ?? null, device?.description ?? null);
+      void setPlayerDevice(settings.audioDevice?.id ?? null);
+      void setPlayerVolume(settings.volume);
+      void setPlayerEqualizer(settings.equalizer.enabled, settings.equalizer.gains);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsLoaded]);

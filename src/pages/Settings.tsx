@@ -5,7 +5,7 @@ import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
 import { useSettingsStore, type UpdateChannel } from '../stores/settingsStore';
-import { listAudioDevices, setEqualizer as mpvSetEqualizer, setProperty as mpvSetProperty, type AudioDevice } from '../lib/mpvClient';
+import { listDevices, setDevice as playerSetDevice, setEqualizer as playerSetEqualizer, type DeviceDescriptor } from '../lib/playerClient';
 import {
   detectEqualizerPreset,
   EQUALIZER_BANDS,
@@ -14,7 +14,6 @@ import {
   type EqualizerPreset,
   type EqualizerSettings,
 } from '../lib/equalizer';
-import { setWaveformDevice } from '../lib/waveform';
 import { useLibraryStore, type ThemeMode } from '../stores/libraryStore';
 import { useUpdateStore } from '../stores/updateStore';
 import { useAlertsStore } from '../stores/alertsStore';
@@ -94,6 +93,8 @@ export function Settings() {
   const settings = useSettingsStore((s) => s.settings);
   const settingsLoaded = useSettingsStore((s) => s.loaded);
   const updateSettings = useSettingsStore((s) => s.update);
+  const deviceMigrationNotice = useSettingsStore((s) => s.deviceMigrationNotice);
+  const dismissDeviceMigrationNotice = useSettingsStore((s) => s.dismissDeviceMigrationNotice);
   const themeMode = useLibraryStore((s) => s.themeMode);
   const setThemeMode = useLibraryStore((s) => s.setThemeMode);
   const notifyOS = useAlertsStore((s) => s.notifyOS);
@@ -131,7 +132,7 @@ export function Settings() {
     [channels, channelMetadata, metadataStatus],
   );
 
-  const [audioDevices, setAudioDevices] = useState<AudioDevice[]>([]);
+  const [audioDevices, setAudioDevices] = useState<DeviceDescriptor[]>([]);
   const [loadingAudioDevices, setLoadingAudioDevices] = useState(false);
   const [equalizer, setEqualizerState] = useState<EqualizerSettings>(settings.equalizer);
   const [equalizerError, setEqualizerError] = useState<string | null>(null);
@@ -142,7 +143,7 @@ export function Settings() {
   function applyEqualizer(next: EqualizerSettings) {
     if (!hasSelectedChannel) return;
     setEqualizerError(null);
-    mpvSetEqualizer(next.enabled, next.gains).catch((err) => {
+    playerSetEqualizer(next.enabled, next.gains).catch((err) => {
       setEqualizerError(err instanceof Error ? err.message : String(err));
     });
   }
@@ -193,14 +194,14 @@ export function Settings() {
     }
   }
 
-  // Enumerating spawns mpv idle, so only do it when the picker is actually
-  // opened rather than on every Settings visit. mpv's own "auto" entry is
-  // dropped in favor of the explicit "System default" option below.
+  // Only enumerate when the picker is actually opened rather than on every
+  // Settings visit. The explicit "System default" option below covers
+  // following the OS default, so device descriptors are listed as-is.
   async function loadAudioDevices() {
     if (loadingAudioDevices) return;
     setLoadingAudioDevices(true);
     try {
-      setAudioDevices((await listAudioDevices()).filter((d) => d.name !== 'auto'));
+      setAudioDevices(await listDevices());
     } catch {
       // Leave the list as-is; the stored selection (if any) still shows.
     } finally {
@@ -211,15 +212,13 @@ export function Settings() {
   async function handleAudioDeviceChange(value: string | null) {
     if (!value) {
       await updateSettings({ audioDevice: null });
-      mpvSetProperty('audio-device', 'auto').catch(() => {});
-      void setWaveformDevice(null, null);
+      playerSetDevice(null).catch(() => {});
       return;
     }
-    const device = audioDevices.find((d) => d.name === value);
-    const selection = { name: value, description: device?.description ?? value };
+    const device = audioDevices.find((d) => d.id === value);
+    const selection = { id: value, name: device?.name ?? value };
     await updateSettings({ audioDevice: selection });
-    mpvSetProperty('audio-device', selection.name).catch(() => {});
-    void setWaveformDevice(selection.name, selection.description);
+    playerSetDevice(selection.id).catch(() => {});
   }
 
   useEffect(() => {
@@ -350,6 +349,11 @@ export function Settings() {
         </Card>
 
         <Card title="Audio">
+          {deviceMigrationNotice && (
+            <Alert color="yellow" title="Output device reset to system default" withCloseButton onClose={dismissDeviceMigrationNotice}>
+              {deviceMigrationNotice}
+            </Alert>
+          )}
           <Select
             label="Output device"
             description="Where audio plays, and the source the visualizer listens to"
@@ -358,12 +362,12 @@ export function Settings() {
               { value: '', label: 'System default' },
               // Surface the saved device even before the list has loaded so it
               // shows its label instead of a bare id on first open.
-              ...(settings.audioDevice && !audioDevices.some((d) => d.name === settings.audioDevice!.name)
-                ? [{ value: settings.audioDevice.name, label: settings.audioDevice.description || settings.audioDevice.name }]
+              ...(settings.audioDevice && !audioDevices.some((d) => d.id === settings.audioDevice!.id)
+                ? [{ value: settings.audioDevice.id, label: settings.audioDevice.name }]
                 : []),
-              ...audioDevices.map((d) => ({ value: d.name, label: d.description || d.name })),
+              ...audioDevices.map((d) => ({ value: d.id, label: d.isDefault ? `${d.name} (system default)` : d.name })),
             ]}
-            value={settings.audioDevice?.name ?? ''}
+            value={settings.audioDevice?.id ?? ''}
             onChange={handleAudioDeviceChange}
             onDropdownOpen={() => { if (audioDevices.length === 0) void loadAudioDevices(); }}
             rightSection={loadingAudioDevices ? <Loader size="xs" /> : undefined}

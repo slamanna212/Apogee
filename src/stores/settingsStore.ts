@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { load, type Store } from '@tauri-apps/plugin-store';
 import { getSecret, setSecret, getBuiltinStellarApiKey, SECRET_KEYS } from '../lib/secrets';
 import { DEFAULT_EQUALIZER, normalizeEqualizerSettings, type EqualizerSettings } from '../lib/equalizer';
+import { migrateDevice } from '../lib/playerClient';
 
 export type UpdateChannel = 'stable' | 'beta';
 
@@ -11,12 +12,30 @@ export interface ScrobblingSettings {
   };
 }
 
-/** A chosen audio output device. `name` is mpv's `audio-device-list` name
- *  (the shared identity used for both playback and the visualizer); `description`
- *  is its friendly label. `null` in settings means "system default". */
+/** A chosen audio output device. `id` is the CPAL device identifier (the
+ *  identity to persist and pass to `player_set_device` - never a display
+ *  name, which is not guaranteed unique); `name` is its friendly label.
+ *  `null` in settings means "system default". */
 export interface AudioDeviceSelection {
+  id: string;
+  name: string;
+}
+
+/** Pre-Symphonia-migration shape of a saved device selection: mpv's
+ *  `audio-device-list` name plus a friendly description, with no stable `id`. */
+interface LegacyAudioDeviceSelection {
   name: string;
   description: string;
+}
+
+function isLegacyAudioDevice(value: unknown): value is LegacyAudioDeviceSelection {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'name' in value &&
+    'description' in value &&
+    !('id' in value)
+  );
 }
 
 export interface Settings {
@@ -64,8 +83,14 @@ interface SettingsState {
   /** Baked in at build time from the shared StellarTunerLog API key - see secrets.rs. */
   builtinStellarApiKey: string | null;
   loaded: boolean;
+  /** Non-null for one load() when a saved MPV device selection couldn't be
+   *  carried over to the new device model - see player_migrate_device in
+   *  src/lib/playerClient.ts. Settings.tsx surfaces this once, then it should
+   *  be cleared via dismissDeviceMigrationNotice(). */
+  deviceMigrationNotice: string | null;
   load: () => Promise<void>;
   update: (patch: Partial<Settings>) => Promise<void>;
+  dismissDeviceMigrationNotice: () => void;
 }
 
 let storePromise: Promise<Store> | null = null;
@@ -80,9 +105,32 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   settings: DEFAULT_SETTINGS,
   builtinStellarApiKey: null,
   loaded: false,
+  deviceMigrationNotice: null,
   async load() {
     const store = await getStore();
     const stored = (await store.get<Record<string, unknown>>('settings')) ?? {};
+
+    // Migrate a device selection saved under the old MPV-backed shape
+    // ({name, description}, no stable id). Rust matches it against the real CPAL
+    // devices and tells us which id it adopted - persist exactly that, or the
+    // migration would silently undo itself on the next launch. A null id means it
+    // could not be matched and the system default is being used instead, which
+    // comes with an explanation to show the user once.
+    let deviceMigrationNotice: string | null = null;
+    if (isLegacyAudioDevice(stored.audioDevice)) {
+      const legacyName = stored.audioDevice.name;
+      const migration = await migrateDevice(legacyName).catch(() => null);
+      deviceMigrationNotice = migration?.notice ?? null;
+
+      const migrated: AudioDeviceSelection | null = migration?.deviceId
+        ? { id: migration.deviceId, name: legacyName }
+        : null;
+
+      const { audioDevice: _legacyAudioDevice, ...rest } = stored;
+      await store.set('settings', { ...rest, audioDevice: migrated });
+      await store.save();
+      stored.audioDevice = migrated;
+    }
 
     // Migrate any plaintext password left over from before keyring storage was added.
     const legacyPassword = typeof stored.password === 'string' ? stored.password : undefined;
@@ -135,8 +183,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         equalizer: normalizeEqualizerSettings(stored.equalizer),
         password: password ?? '',
         onboardingComplete: isPreOnboardingInstall || Boolean(stored.onboardingComplete),
+        audioDevice: (stored.audioDevice as AudioDeviceSelection | null | undefined) ?? null,
       },
       builtinStellarApiKey,
+      deviceMigrationNotice,
       loaded: true,
     });
   },
@@ -152,5 +202,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     if (patch.password !== undefined) {
       await setSecret(SECRET_KEYS.xtreamPassword, password);
     }
+  },
+  dismissDeviceMigrationNotice() {
+    set({ deviceMigrationNotice: null });
   },
 }));

@@ -12,7 +12,8 @@ Use this stack as the implementation baseline:
 | --- | --- |
 | HTTP and HTTPS throughout application-controlled networking | Reqwest with Rustls, on Tokio |
 | HLS protocol client | hls-runtime, using its caller-driven client core |
-| MPEG-TS parsing and audio extraction | mpeg2ts-reader |
+| Direct MPEG-TS parsing and audio extraction | transmux::StreamingTsDemux, sharing the implementation used by hls-runtime |
+| Container detection | container-probe from the same workspace, after released-API validation |
 | MP3/AAC decoding | Symphonia |
 | Sample-rate conversion | Rubato |
 | Audio devices and output | CPAL |
@@ -73,34 +74,35 @@ Important facts:
 ## 4. Architecture and module boundaries
 
 ```text
-React / Zustand
-    | typed commands and playback snapshots/events
-Tauri command adapter
-    | requests
-Playback controller ---------------------------------------+
-    |                                                     |
-    +-- Direct HTTP source --+                            | settings
-    +-- HLS source ----------+                            | cancellation
-         hls-runtime         |                            | recovery
-         Reqwest fetches     v                            |
-                       content routing                    |
-                             |                            |
-                      TS / ADTS / MP4 adapter              |
-                             | compressed audio + timing   |
-                       Symphonia worker                    |
-                             | PCM                         |
-                    channels + resampling                  |
-                             |                            |
-                      bounded PCM ring                    |
-                             |                            |
-                 CPAL callback: EQ / volume <--------------+
-                             |
-                      OS output device
-                             |
-                   nonblocking sample tap
-                             v
-                    FFT analysis worker --> UI spectrum
+React / Zustand <--> Tauri adapter <--> Playback controller
+                                            | commands/settings/cancellation
+Shared Reqwest service                      |
+    |                                       |
+Bounded content detection (container-probe)  |
+    |                                       |
+    +-- Direct TS --> StreamingTsDemux ------+--> compressed-sample adapter
+    |                                       |        |
+    +-- HLS --> hls-runtime -----------------+        v
+                internal TS/fMP4 demux          Symphonia decoder
+                Output::Samples                      |
+                                               channels + Rubato
+                                                     |
+                                               bounded PCM ring
+                                                     |
+                                         CPAL callback: EQ / volume
+                                                     |
+                                                OS audio output
+                                                     |
+                                           nonblocking sample tap
+                                                     v
+                                          FFT worker --> UI spectrum
 ```
+
+**Demux exactly once.** hls-runtime's reviewed client contract emits `Output::Samples`: demuxed compressed access units, not PCM and not container bytes. Its internal transmux TS/fMP4 demuxers already perform container extraction. Route those samples directly into the common compressed-sample adapter. Never pass them through a second TS/ADTS/MP4 demuxer or repackage them merely to feed a file reader.
+
+For direct endless TS connections, use transmux's incremental `StreamingTsDemux`; `TsDemux` is the batch wrapper, not the default interface for an endless source. Pin compatible versions shared with hls-runtime so both paths use the same demux implementation. Drop mpeg2ts-reader from the baseline. If a selected release differs from the reviewed contract, document its actual output boundary before proceeding; the invariant remains one demux stage per path.
+
+The convergence point is compressed access units plus codec configuration, track identity, timing, and discontinuity events. Using shared code reduces divergence but does not prove identical state handling: test continuous input and segmented input against each other.
 
 Suggested new files; keep closely related items together if separate files add no value:
 
@@ -114,7 +116,8 @@ src-tauri/src/playback/controller.rs     session ownership, retries, state trans
 src-tauri/src/playback/source/mod.rs     source events and bounded content detection
 src-tauri/src/playback/source/http.rs    direct streaming source
 src-tauri/src/playback/source/hls.rs     hls-runtime driver with Reqwest transport
-src-tauri/src/playback/demux.rs          MPEG-TS/audio framing bridge
+src-tauri/src/playback/demux.rs          direct StreamingTsDemux adapter
+src-tauri/src/playback/samples.rs        shared access-unit/config/timing adapter
 src-tauri/src/playback/decode.rs         Symphonia worker
 src-tauri/src/playback/output.rs         CPAL owner, PCM ring, channel conversion/resampling
 src-tauri/src/playback/dsp.rs            EQ, gain ramps, output protection
@@ -141,10 +144,10 @@ Create `docs/symphonia-dependency-validation.md` with exact versions, features, 
 
 Validate:
 
-1. **hls-runtime:** locate the actual published repository/source and client examples. Verify ordinary live HLS as well as its advertised low-latency model. Determine how it handles master playlists, audio renditions, media sequence, redirects/relative URLs, initialization segments, byte ranges, discontinuities, gaps, end lists, encryption, and cancellation. Record supported, unsupported, and untested separately. Verify the media output type: bytes, resources, or already parsed frames; adapt to that actual API rather than assuming bytes.
+1. **hls-runtime:** locate the actual published repository/source and client examples. Verify ordinary live HLS as well as its advertised low-latency model. Determine how it handles master playlists, audio renditions, media sequence, redirects/relative URLs, initialization segments, byte ranges, discontinuities, gaps, end lists, encryption, and cancellation. Record supported, unsupported, and untested separately. Confirm the selected release's `Output::Samples` payload and internal transmux dependency. Record where codec configuration, timescales, track changes, and discontinuities are exposed. Write a compile proof that translates its output directly to the common compressed-sample contract without any container demuxer downstream.
 2. Use hls-runtime's caller-driven core so requests pass through network.rs. If its Tokio adapter supports injecting the required client/policies, it may be used after verification. Avoid a hidden second HTTP stack and unnecessary server/origin dependencies where features permit.
 3. **Symphonia:** enable only needed MP3/AAC and container features. Confirm profile and framing on a representative provider sample. Its published matrix distinguishes AAC-LC from HE-AAC variants. This is one concrete compatibility check, not a reason to broaden codec scope. Document a real unsupported case instead of silently degrading it.
-4. **mpeg2ts-reader:** compile a PAT/PMT plus elementary-stream callback example with the chosen release. Establish how continuity errors and PES timestamps are exposed.
+4. **transmux and container-probe:** select releases compatible with hls-runtime. Compile an incremental StreamingTsDemux example; verify MP3 and required AAC framing, track configuration, continuity events, timestamps, and bounded state on endless input. Confirm container-probe's incremental API, ambiguity/need-more-data results, and support for 188/192/204/208-byte TS layouts. These are source-review requirements, not assumed passing tests. Prefer these existing implementations to new packet detection or parsing code. Check dependency resolution to avoid duplicate incompatible transmux types/versions.
 5. **CPAL:** promote the existing Windows-only dependency to applicable desktop targets. Validate output sample formats, device identifiers, backend features, and minimum supported OS versions.
 6. **Rubato:** confirm block sizes, reusable buffers, latency, and the conversion API for the chosen release. Do not assume APIs from older versions.
 7. **Reqwest:** the repository currently pins 0.12.28 with Rustls. Prefer a compatible version shared with retained Tauri components; do not upgrade to latest blindly. Inspect `cargo tree -d` and the relevant feature tree. If a duplicate version is unavoidable, document why and its cost.
@@ -180,11 +183,11 @@ Inventory remaining network entry points, including browser `<img>` loads and up
 
 ### Detection rules
 
-Use content type plus a bounded prefix probe. Retain every probed byte and replay it into the selected pipeline.
+Use content type plus a bounded prefix probe implemented with container-probe. Retain every probed byte and replay it into the selected source/demux path. Use the library's confidence/ambiguity results; request more data within the bound rather than guessing. Verify the released API in M0.
 
 - `#EXTM3U` identifies a playlist after supported leading BOM/whitespace handling.
-- Repeated valid TS packet framing identifies MPEG-TS. Account for arbitrary HTTP chunk boundaries; a single 0x47 byte is insufficient evidence.
-- Recognized ADTS/MP3/MP4 framing routes to the appropriate supported reader.
+- Use container-probe's TS stride/phase detection for supported 188/192/204/208-byte packet layouts. Test arbitrary HTTP chunk boundaries, ambiguous prefixes, and false sync bytes. Normalize framing only if required by the selected StreamingTsDemux API; do not write a competing detector.
+- Raw ADTS/MP3/MP4 content, if encountered directly, needs its own verified adapter before the common access-unit boundary. This does not add a downstream demuxer to HLS sample output. Do not broaden scope speculatively.
 - HTML/JSON error responses with HTTP 200 must become actionable source errors, not endless decoder probing.
 - Bound probe bytes and elapsed time. Distinguish incomplete input from definitive unsupported input.
 - Specifically test `.m3u8` returning chunked raw TS and a misleading MIME type.
@@ -195,23 +198,25 @@ Drive hls-runtime with cancellable network operations and monotonic time. Bound 
 
 Select an audio rendition deterministically when alternatives exist. Use the library's live scheduling and sequencing rather than writing a competing scheduler around it. Ensure completed requests cannot reorder playback.
 
-Normal segment boundaries should not reset a continuous decoder. Actual discontinuities, codec changes, or invalid continuity require a deliberate flush/reset and an explicit rebuffer event. For fragmented MP4, retain initialization data and use an integration proven to handle fragments; do not assume ordinary MP4 support automatically proves live fMP4 support. Validate decryption capabilities if an encountered playlist needs them; recognizing an encryption tag is not decryption support.
+Normal segment boundaries should not reset a continuous decoder. Forward the library's sample/configuration/discontinuity events into the common adapter. Actual discontinuities, codec changes, or invalid continuity require a deliberate flush/reset and an explicit rebuffer event. For fragmented MP4, hls-runtime's internal Fmp4Demux owns container/init-segment parsing; verify that its output supplies the decoder configuration and timing required by Symphonia. Do not add a Symphonia MP4 reader behind these samples. Validate decryption capabilities if an encountered playlist needs them; recognizing an encryption tag is not decryption support.
 
 Use local fixture playlists for ordinary HLS even if the available provider happens to return only raw TS. Do not mark HLS implemented based on successful `.m3u8` URLs that actually contain TS.
 
-## 8. MPEG-TS and Symphonia bridge
+## 8. Shared compressed-sample bridge to Symphonia
 
-The demux adapter must discover programs/tracks, select the intended audio track, and reconstruct elementary audio. Avoid retaining video payload if present.
+Direct TS: feed arbitrary network chunks into StreamingTsDemux and translate its events. HLS: translate hls-runtime's already-demuxed sample output. Both adapters must produce the same internal representation, with no second container parsing pass.
 
-- Handle PAT/PMT repetition and updates.
-- Retain partial TS, PES, and audio frames across incoming chunks.
-- PES packet boundaries are not audio-frame boundaries.
-- Preserve relevant timing and discontinuity metadata alongside compressed frames.
-- On damaged continuity, discard affected partial frames and resynchronize; never concatenate known-corrupt fragments into valid-looking audio.
-- Support the observed AAC transport framing explicitly (e.g. ADTS). If a sample uses LATM/LOAS, record and resolve that adapter requirement; do not feed it into an ADTS reader.
-- Choose either a small Symphonia FormatReader bridge or its existing elementary-stream reader behind a cancellable input adapter. Prove the chosen API with a fixture before building abstractions around it.
-- Distinguish temporary lack of network bytes from end-of-stream. A reader returning zero bytes commonly signals EOF and must not be used for a temporary empty queue.
-- A decoder format/configuration change must reconfigure downstream conversion safely and flush incompatible queued samples.
+Define explicit records for track configuration, compressed access units, discontinuity/reset, and end-of-stream. Include codec/profile information, decoder initialization bytes, track identity, presentation/decode timestamps and timescale, and duration where available. Keep the representation narrow; do not replicate the entire transmux IR.
+
+- Let the shared transmux implementation handle PAT/PMT, TS/PES assembly, and supported audio framing. Verify partial TS/PES/audio data survives input chunks and that retained state is bounded.
+- Select the audio track deterministically and avoid retaining video payload unnecessarily.
+- Verify support for observed MP3/AAC framing; if required LATM/LOAS is unsupported, document that specific gap rather than passing it to an ADTS reader.
+- Map demuxed access units to Symphonia decoder packets with correct codec configuration. Verify whether AAC headers have already been stripped; neither strip twice nor prepend an ADTS/container wrapper by assumption.
+- Translate timestamps/durations using explicit timebases. Handle unknown timing, wraparound, gaps, and track changes consistently on both paths.
+- Forward meaningful continuity/reset events. Reset decoder/resampler and flush incompatible PCM when needed; never reset solely because another normal HLS segment arrived.
+- Keep one decoder per selected track/session. Do not recreate it for each access unit or segment.
+- Distinguish pending input from end-of-stream using channel/events. A temporarily empty queue is not EOF.
+- Prove identical decoded duration and equivalent sample continuity when the same audio is fed as continuous TS and as HLS segments. This test is required even when both paths share a demux implementation.
 
 Track compressed audio bytes and decoded duration for displayed bitrate. Do not label total TS/HTTP throughput as audio bitrate. Allow unknown bitrate until enough evidence exists.
 
@@ -283,6 +288,7 @@ Retain useful FFT normalization/smoothing from waveform.rs but re-evaluate captu
 - [ ] Record observed codec/profile/framing without secrets.
 - [ ] Create local TS, real HLS, and mislabeled-URL fixtures plus a deterministic HTTP fixture server.
 - [ ] Establish clean build/toolchain requirements for each desktop target.
+- [ ] Create `docs/symphonia-platform-acceptance.md` in M0 with the matrix below, a named tester/device or explicit UNASSIGNED status for every platform, artifact delivery method, and planned manual checkpoints. Missing hardware access must be visible now, not discovered in M5.
 
 Exit: dependencies resolve; actual APIs and material gaps are documented; fixtures do not require a subscription or internet connection.
 
@@ -298,8 +304,9 @@ Exit: API tests pass; one configurable application HTTP service exists; no live 
 ### M2 — Headless source-to-PCM pipeline
 
 - [ ] Implement content detection and direct TS ingestion.
-- [ ] Implement TS-to-Symphonia bridge and decode into a test sink.
-- [ ] Implement hls-runtime transport adapter and genuine HLS fixture playback.
+- [ ] Implement StreamingTsDemux and the shared access-unit-to-Symphonia bridge; decode into a test sink.
+- [ ] Implement hls-runtime transport adapter and genuine HLS fixture playback, feeding Output::Samples directly into the shared adapter.
+- [ ] Compare continuous TS versus segmented HLS for the same audio; assert no duplicate demux, sample duplication, or boundary reset.
 - [ ] Preserve timing/reset information and bounded queues.
 
 Exit: MP3/AAC fixtures yield correctly timed PCM; successive HLS segments do not introduce artificial decoder resets/gaps; mislabeled `.m3u8` TS works.
@@ -309,9 +316,9 @@ Exit: MP3/AAC fixtures yield correctly timed PCM; successive HLS segments do not
 - [ ] Add CPAL output owner, conversion/resampling, bounded ring, and underrun reporting.
 - [ ] Implement generation-safe controller, snapshots/events, cancellation, stop/resume, retry/fallback.
 - [ ] Add device enumeration, default fallback, and hotplug recovery.
-- [ ] Prove audio on the available desktop and schedule real-device checks for the others.
+- [ ] Prove audio on the available physical desktop. Deliver test artifacts and instructions to the Windows/macOS manual testers identified in M0; run the first audible-output, stop/switch, and device enumeration checks now. Mark unavailable results PENDING MANUAL VALIDATION, never passed by CI.
 
-Exit: station switch/stop cancels every stage; actual output confirms Playing; invalidated sessions cannot emit audio/state; retries are bounded.
+Exit for core implementation: station switch/stop cancels every stage; actual output confirms Playing on tested hardware; invalidated sessions cannot emit audio/state; retries are bounded. Platform readiness is separate: Windows/macOS checks require manual evidence. Independent M4 work may continue while those results are pending; do not declare all-platform M3 acceptance.
 
 ### M4 — Feature parity
 
@@ -320,6 +327,7 @@ Exit: station switch/stop cancels every stage; actual output confirms Playing; i
 - [ ] Replace mpvClient with playerClient and simplify playerStore.
 - [ ] Remove frontend MPV polling and duplicate retries.
 - [ ] Verify OS controls, sleep timer, media metadata, Discord presence, Last.fm/scrobbling, and notification behavior.
+- [ ] Run manual Windows/macOS hotplug, default-device switching, and legacy-device migration checks against this milestone's artifact; record failures and fix before release readiness.
 
 Exit: existing user-visible functions work; scrobbling counts real playback rather than connecting/recovering; stopped state has no background capture work.
 
@@ -355,7 +363,8 @@ Use generated or redistributable short fixtures and a local HTTP server. No paid
 | --- | --- |
 | Detection | TS at `.m3u8`; playlist at unexpected extension; wrong MIME; chunk-split prefix; HTML error body; bounded probe |
 | Direct HTTP | Chunked indefinite body; redirects; initial timeout then success; stalled read; cancellation while waiting |
-| TS/framing | Arbitrary byte chunk boundaries; partial PES/audio frames; continuity gap; PMT update; non-audio packets |
+| TS/framing | StreamingTsDemux with arbitrary chunks; supported packet strides; partial PES/audio frames; continuity gap; PMT update; non-audio packets |
+| Shared sample bridge | HLS samples bypass demux; configuration/timescale propagation; continuous TS versus segmented HLS equivalence; no resets at normal boundaries |
 | Decode | MP3 and supported AAC fixtures; correct duration/rate/channels; corrupt frame recovery; config change |
 | HLS | Real sliding live playlist; master-to-media selection; relative URL after redirect; duplicate reload; ordered segment output; missing segment; discontinuity; end list; required init/byte-range cases |
 | Controller | A-to-B race; A-to-A race; stop during connect/retry/full queue; stale snapshot/event; bounded retries; permanent error |
@@ -382,9 +391,28 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
 
 Use existing platform build scripts/config overlays for native bundles; inspect them before choosing exact commands. Record baseline warnings separately from introduced failures. If adding an isolated core crate, explicitly test it too. Run tests appropriate to each milestone rather than repeating full packaging after every small edit.
 
+### Platform execution constraints and manual ownership
+
+The current working-tree release/dev workflows have Linux builds on `rapture-apogee`, Windows builds on `windows-latest`, and macOS universal builds on `macos-latest`. Several orchestration jobs also use `rapture-apogee`. Reinspect the workflows in M0: the claim that all release builds use one runner does not match this checkout, and runner arrangements can change.
+
+**Native compilation/packaging is not audio-device validation. Windows and macOS audible playback, hotplug, default-device following, and migration of real saved device selections are manual tests under this plan.** There is no verified automated physical-audio lab. A GitHub-hosted build, mock output device, or loopback-free headless fixture cannot pass those checks. Do not assume the self-hosted Linux runner has usable physical audio either.
+
+Create and maintain this matrix from M0:
+
+| Target | Automated evidence available/required | Manual evidence required | Initial status |
+| --- | --- | --- | --- |
+| Linux supported packages | Existing build runner; add/verify fixture and Rust checks | Audible output, devices/hotplug, suspend/resume, settings upgrade, long session on a physical desktop | UNASSIGNED until tester/device recorded |
+| Windows x64 | Hosted native build; add/verify headless tests | WASAPI output, device switching/hotplug, old MPV device migration, media keys, installer/relaunch, long session | PENDING MANUAL VALIDATION |
+| macOS Apple Silicon | Hosted universal build; add/verify headless tests | CoreAudio output, device switching/hotplug, old device migration, media keys, signed-app startup, long session | PENDING MANUAL VALIDATION |
+| macOS Intel, if supported | Universal binary contains Intel slice; execution is not implied | Physical Intel execution/audio and upgrade smoke test; required device/long-session coverage | PENDING MANUAL VALIDATION |
+
+For each result record tester, date, OS/architecture, physical audio device/backend, commit/artifact identity, test steps, observed behavior, and redacted diagnostics. Track build, headless tests, and manual tests in separate columns. Defaults are pending, not passing.
+
+Checkpoints: M0 identifies hardware/test owners and unknowns; M3 requests the first audio/device smoke pass; M4 exercises DSP/hotplug/migration; M5 repeats release acceptance against final artifacts. If no tester/device is available, continue independent code and automated work, but retain an explicit release-readiness blocker for that platform. Do not mark the migration complete or remove support for the platform to make the checklist pass. Shipping with a missing acceptance result would require an explicit user decision, not an agent assumption.
+
 ### Real desktop acceptance
 
-Run on Windows x64, macOS Apple Silicon and Intel if both remain supported, and the supported Linux packaging environments:
+The following are manual unless a specific hardware automation setup and evidence have been documented. Run on Windows x64, macOS Apple Silicon and Intel if both remain supported, and the supported Linux packaging environments:
 
 - Clean install without MPV/FFmpeg or Homebrew media packages.
 - Direct TS and genuine HLS audible output.
@@ -400,7 +428,8 @@ Run on Windows x64, macOS Apple Silicon and Intel if both remain supported, and 
 
 ## 14. Completion checklist
 
-- [ ] Both source paths use the same application HTTP service and converge on the Rust audio pipeline.
+- [ ] Both source paths use the same application HTTP service and converge at compressed access units, with exactly one demux stage each.
+- [ ] Direct TS and hls-runtime share compatible transmux code; mpeg2ts-reader is not a parallel baseline demuxer.
 - [ ] hls-runtime is actually integrated and tested with real playlist fixtures.
 - [ ] No extension-only routing assumption remains.
 - [ ] MP3/AAC scope is verified against documented profile/framing fixtures.
@@ -410,6 +439,7 @@ Run on Windows x64, macOS Apple Silicon and Intel if both remain supported, and 
 - [ ] Network consolidation inventory is complete, with framework-owned exceptions explicit.
 - [ ] MPV and capture-specific dependencies/configuration are removed from production.
 - [ ] Windows updater and all supported desktop bundles are validated.
+- [ ] M0 platform matrix has final manual hardware evidence for Windows/macOS (including hotplug and legacy-device migration), clearly separated from CI build results.
 - [ ] Progress report names exact tests, remaining limitations, and any unavailable platform evidence.
 
 ## 15. Primary references
@@ -420,8 +450,8 @@ These links informed the design. Verify selected release documentation during im
 - [Symphonia format readers](https://docs.rs/symphonia/latest/symphonia/default/formats/index.html)
 - [hls-runtime crate documentation](https://docs.rs/hls-runtime/latest/hls_runtime/)
 - [hls-runtime client interface](https://docs.rs/hls-runtime/latest/hls_runtime/client/struct.HlsClient.html)
-- [mpeg2ts-reader](https://docs.rs/mpeg2ts-reader/latest/mpeg2ts_reader/)
-- [Elementary stream callbacks](https://docs.rs/mpeg2ts-reader/latest/mpeg2ts_reader/pes/trait.ElementaryStreamConsumer.html)
+- [transmux and StreamingTsDemux](https://docs.rs/transmux/latest/transmux/)
+- [container-probe](https://docs.rs/container-probe/latest/container_probe/)
 - [Reqwest](https://docs.rs/reqwest/latest/reqwest/)
 - [Tauri HTTP plugin and Reqwest relationship](https://docs.rs/tauri-plugin-http/latest/tauri_plugin_http/)
 - [Rubato](https://docs.rs/rubato/latest/rubato/)
