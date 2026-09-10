@@ -156,7 +156,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential curl wget file libxdo-dev libssl-dev \
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm libfuse2 xdg-utils \
-            pkg-config libglib2.0-bin libgtk-3-bin libgdk-pixbuf2.0-bin desktop-file-utils zsync
+            pkg-config libglib2.0-bin libgtk-3-bin libgdk-pixbuf2.0-bin desktop-file-utils zsync \
+            libasound2-dev
+
+      - name: Ensure ALSA dev headers (self-hosted runner)
+        # The self-hosted runner is pre-provisioned with its own toolchain
+        # and skips "Install Linux dependencies" above, so it never picked
+        # up libasound2-dev when the Rust audio engine (alsa-sys/cpal) was
+        # added. Installing it here too keeps that provisioning gap from
+        # breaking the build again as new deps show up, without redoing the
+        # rest of the (already-present) toolchain install on every run.
+        if: matrix.platform == 'ubuntu-22.04' && runner.environment != 'github-hosted'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -216,6 +229,20 @@ jobs:
           releaseId: ${{ needs.prepare-release.outputs.release_id }}
           releaseDraft: true
           prerelease: ${{ needs.check-version.outputs.prerelease == 'true' }}
+
+      - name: Fix AppImage host-interface libraries (#67)
+        if: matrix.platform == 'ubuntu-22.04'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.check-version.outputs.tag }}"
+          APPIMAGE="$(ls src-tauri/target/release/bundle/appimage/*.AppImage)"
+          scripts/fix-appimage-host-libs.sh "$APPIMAGE"
+          # tauri-action already uploaded the flawed build above under this
+          # same filename; overwrite that release asset with the fixed one.
+          gh release upload "$TAG" "$APPIMAGE" --repo "${{ github.repository }}" --clobber
 
       - name: Validate packaged macOS application
         if: matrix.platform == 'macos-latest'

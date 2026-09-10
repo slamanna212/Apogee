@@ -132,3 +132,36 @@ during "upstream channel spin-up" as a known transient condition for direct prov
 Three tests cover it, including one asserting that when every failure is free the retries
 still span the full budget, and one asserting the request count inside that window stays
 modest so the fix does not become a hammering bug.
+
+## Silent failure: server error messages were being discarded
+
+**Symptom:** three channels failed with a bare "503 Service Unavailable" and no indication
+of why. They never recovered, while other channels played fine.
+
+**Actual cause, not ours.** Those channels had no upstream stream assigned in Dispatcharr,
+which says so plainly in the response body:
+
+```
+{"error": "No streams assigned to channel", "waited": "0s"}
+```
+
+**Our bug was hiding it.** `NetworkError::Status` carried only a `StatusCode` and threw the
+body away, so an actionable message became an opaque status. Fixed in three parts:
+
+- `NetworkError::Status` now carries an optional `detail`, read from the error body with a
+  512-byte ceiling and a 2-second timeout so a failure path cannot stall. JSON
+  `error`/`message`/`detail` fields are unwrapped, since that is how these proxies report a
+  reason; anything else falls back to a trimmed prefix. Always redacted, because a body can
+  echo the request URL.
+- `SourceError::Status { status, detail }` keeps the status code instead of stringifying it,
+  and leads its message with the server's own reason.
+- Retry classification now distinguishes them: **4xx is permanent** (the request itself is
+  wrong, repeating it unchanged cannot succeed) while **5xx stays retryable** (the server
+  could not serve it *now*, which is the documented upstream spin-up case).
+
+I deliberately did **not** special-case the "No streams assigned" string. Matching a
+particular proxy's wording would break for anyone connecting directly to a provider. A 503
+with a body is still retried, but now the user can see why from the first attempt.
+
+Three tests cover it, including one asserting a credential in an error body never survives
+into a surfaced message.
