@@ -94,6 +94,34 @@ pub enum BufferingReason {
 pub const MAX_CONNECT_ATTEMPTS: u32 = 4;
 pub const RETRY_DELAY_MS: u64 = 1_500;
 pub const CONNECT_TIMEOUT_MS: u64 = 20_000;
+
+/// How long the whole connect phase may take before giving up.
+///
+/// The attempt count alone is not a sufficient budget. Under MPV each attempt could sit for
+/// up to `CONNECT_TIMEOUT_MS` waiting for a stream that never arrived, so four attempts
+/// spanned more than a minute in the worst case. An error that fails *immediately* -
+/// notably a 503 while a backend is still spinning the upstream up - collapses those four
+/// attempts into a few seconds and gives up long before the stream could ever have become
+/// available.
+///
+/// This budget restores the wall-clock window independently of how fast attempts fail. It
+/// is deliberately backend-agnostic: a provider reached directly and a proxy in front of one
+/// both take time to bring a channel up, and the plan already records first-attempt
+/// timeouts during "upstream channel spin-up" as a known transient condition.
+pub const CONNECT_BUDGET_MS: u64 = 90_000;
+
+/// Ceiling on the backoff delay between attempts.
+pub const MAX_RETRY_DELAY_MS: u64 = 8_000;
+
+/// Delay before the attempt numbered `attempt` (1-based), with exponential backoff.
+///
+/// Backoff matters because a fast-failing endpoint would otherwise be hammered for the whole
+/// budget. Capped so recovery stays responsive once the stream does come up.
+#[must_use]
+pub fn retry_delay_ms(attempt: u32) -> u64 {
+    let shift = attempt.saturating_sub(1).min(6);
+    (RETRY_DELAY_MS.saturating_mul(1u64 << shift)).min(MAX_RETRY_DELAY_MS)
+}
 /// Uninterrupted audible playback that must elapse before the retry budget is refilled.
 ///
 /// The plan is explicit that a successful HTTP response is not evidence of health; only
@@ -135,6 +163,8 @@ pub struct Controller {
     error: Option<String>,
     /// Monotonic milliseconds at which the current Playing stretch began.
     playing_since_ms: Option<u64>,
+    /// When the current connect phase began, for the wall-clock budget.
+    connect_started_ms: Option<u64>,
 }
 
 impl Default for Controller {
@@ -158,6 +188,7 @@ impl Controller {
             device: None,
             error: None,
             playing_since_ms: None,
+            connect_started_ms: None,
         }
     }
 
@@ -179,6 +210,7 @@ impl Controller {
         self.sample_rate = None;
         self.error = None;
         self.playing_since_ms = None;
+        self.connect_started_ms = None;
         self.bump();
         self.generation
     }
@@ -195,6 +227,7 @@ impl Controller {
         self.sample_rate = None;
         self.error = None;
         self.playing_since_ms = None;
+        self.connect_started_ms = None;
         self.bump();
         self.generation
     }
@@ -282,6 +315,7 @@ impl Controller {
             && now_ms.saturating_sub(since) >= STABLE_PLAY_RESET_MS
         {
             self.attempt = 0;
+            self.connect_started_ms = None;
         }
         self.playing_since_ms = None;
 
@@ -293,8 +327,17 @@ impl Controller {
             return Some(Next::GiveUp);
         }
 
+        let started = *self.connect_started_ms.get_or_insert(now_ms);
+        let elapsed = now_ms.saturating_sub(started);
         self.attempt += 1;
-        if self.attempt >= MAX_CONNECT_ATTEMPTS {
+
+        // Two independent limits, and giving up needs BOTH to be spent. The attempt count
+        // stops a slow endpoint being retried forever; the wall-clock budget stops a
+        // fast-failing one from exhausting those attempts in a couple of seconds, long
+        // before a stream that is still starting up could have appeared.
+        let attempts_spent = self.attempt >= MAX_CONNECT_ATTEMPTS;
+        let budget_spent = elapsed >= CONNECT_BUDGET_MS;
+        if attempts_spent && budget_spent {
             self.state = PlaybackState::Failed;
             self.buffering_reason = None;
             self.error = Some(redacted_message.into());
@@ -308,7 +351,7 @@ impl Controller {
         self.bump();
         Some(Next::Retry {
             attempt: self.attempt,
-            delay_ms: RETRY_DELAY_MS,
+            delay_ms: retry_delay_ms(self.attempt),
             extension: Self::extension_for_attempt(self.attempt),
         })
     }

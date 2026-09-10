@@ -551,7 +551,7 @@ export function Settings() {
         <Card title="Diagnostics">
           <Switch
             label="Verbose logging"
-            description="Logs every mpv event, command, and a periodic playback heartbeat - turn on before reproducing a playback issue, then download the log below"
+            description="Logs playback engine state changes and a periodic bitrate heartbeat - turn on before reproducing a playback issue, then download the log below"
             checked={settings.verboseLogging}
             onChange={(e) => {
               const verbose = e.currentTarget.checked;

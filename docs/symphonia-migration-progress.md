@@ -7,11 +7,11 @@ M0 complete; M1 not started. MPV remains the production player until the replace
 | Milestone | Status | Evidence / remaining work |
 | --- | --- | --- |
 | M0: dependencies, baseline, fixtures | Complete | Crate builds; 4 tests pass, incl. direct-TS vs HLS bit-exact PCM parity on real provider audio |
-| M1: networking | Not started | Shared client and API migration pending |
+| M1: networking | Complete | NetworkService plus the full API migration; plugin-http removed |
 | M2: source-to-PCM | Complete | Detection, shared pipeline, both ingest adapters, networked TS and HLS sources; 84 tests |
 | M3: output/controller | Complete (backend) | Engine, CPAL output, devices, Tauri commands; end-to-end decode to device proven. Audible confirmation outstanding |
 | M4: parity | Complete, awaiting audible confirmation | Frontend swapped to the engine; 127 Rust + 189 frontend tests |
-| M5: cleanup/release validation | Not started | No MPV removal yet |
+| M5: cleanup/release validation | Code complete | MPV removed; platform acceptance outstanding for Windows/macOS |
 
 ## Work log
 
@@ -35,8 +35,10 @@ M0 complete; M1 not started. MPV remains the production player until the replace
 ## Scope decisions (2026-09-10)
 
 - Execute the full plan through M5, including MPV removal. Reverting is handled through git.
-- M1 is reduced to **media networking only**. The shared NetworkService is built for the streaming paths the engine needs. Porting Xtream, Stellar, Last.fm, and artwork to typed Rust commands and removing plugin-http is deferred out of this milestone to avoid destabilising channel loading and metadata, which currently work. The plan's single-HTTP-stack goal therefore remains outstanding and must not be reported as met.
-- Nothing is committed until audible playback is confirmed, expected after M4. All work sits in the dev working tree until then.
+- M1 was initially reduced to **media networking only**, then completed during M5 on the user's
+  instruction once audible playback was confirmed. The single-HTTP-stack goal is now met.
+- Nothing was committed by the agent. The user committed M1-M4 themselves as
+  `start work on rust playback engine`; the M5 work sits uncommitted on top for their review.
 - Physical audio validation is Linux-only. See `symphonia-platform-acceptance.md`.
 - `src-tauri` is now a Cargo workspace with `playback-core` as a member, so core pipeline tests run without building Tauri. MSRV raised from 1.77.2 to 1.95 to match hls-runtime; CI already used `dtolnay/rust-toolchain@stable`, so the previous 1.77.2 declaration was already inaccurate.
 
@@ -397,6 +399,80 @@ the output stage rather than of a playback session.
 
 **MPV is still registered and functional in the backend.** Nothing has been deleted and nothing is
 committed. See `symphonia-manual-test-guide.md`.
+
+## M5 complete (code)
+
+### MPV removed
+
+`mpv.rs`, `waveform.rs`, the two platform capture modules, `mpvClient.ts` and
+`scripts/fetch-mpv.mjs` are deleted. The Windows Job Object is gone, and with it the
+`win32job` dependency. `rustfft` moved to `playback-core` with the analyser and `libc` went
+with the Linux capture path.
+
+Packaging: `beforeBuildCommand` no longer fetches MPV, the platform overlays bundle no
+resources, and the Linux package dependency changed from `mpv` to the ALSA runtime library.
+That is a **net reduction** in what users must install. The macOS entitlements comment no
+longer cites Homebrew MPV discovery and records that no capture or microphone entitlement is
+needed. `libasound2-dev` was added to the CI Linux dependency step.
+
+The updater's custom Windows installer path was **kept** while its job-object coupling was
+removed. The plan asks to preserve installer launch-failure reporting, and that is a separate
+concern from the breakaway flag: the updater plugin ignores the installer launch's return
+value and then exits unconditionally, so a failed launch would otherwise leave the user with
+no installer, no update and no error.
+
+### Networking consolidated
+
+Xtream (`xtream.rs`), StellarTunerLog (`stellar.rs`), the GitHub release list (`updater.rs`),
+Last.fm and notification artwork all now go through `NetworkService`. `tauri-plugin-http` and
+its wildcard `http:default` capability are removed, as is `fetchWithTimeout.ts`.
+
+Credential handling was the reason to move Xtream in particular: its credentials travel in
+**query parameters**, and a transport error's `Display` embeds the URL. Those messages are
+surfaced directly in UI-visible store state, so a leak would have been user-visible. Tests
+assert no user-facing error contains a URL or a credential.
+
+**One HTTP stack, with two documented exceptions**, both framework-owned rather than
+application-owned: channel artwork loaded by `<img>` tags in the webview, and the updater
+plugin's own download of a release artifact. The plan permits these provided they are
+explicit, which they now are in `network.rs`'s module documentation.
+
+### Verification
+
+141 Rust tests and 186 frontend tests pass. `cargo clippy --workspace --all-targets` reports
+zero warnings; `npm run lint` reports only the two pre-existing ChannelCard warnings. Both
+builds are clean.
+
+The frontend test count fell from 189 because three `buildStreamUrl` tests were deleted along
+with the function; Rust now builds stream URLs and carries equivalent tests.
+
+## Completion checklist (plan section 14)
+
+| Item | Status |
+| --- | --- |
+| Both source paths use the same HTTP service and converge at compressed access units, one demux stage each | Met |
+| Direct TS and hls-runtime share compatible transmux; `mpeg2ts-reader` is not a parallel demuxer | Met — `mpeg2ts-reader` appears nowhere in `Cargo.lock`, and `cargo tree -d` shows no duplicate transmux |
+| hls-runtime actually integrated and tested with real playlist fixtures | Met |
+| No extension-only routing assumption remains | Met — routing is by content probe; a `.m3u8` serving raw TS is covered by a test |
+| MP3/AAC scope verified against documented profile/framing fixtures | Met, with the documented AAC-LC-only limit |
+| One controller owns retries, cancellation and playback truth | Met |
+| Bounded buffering and session generations tested under adversarial timing | Met |
+| Devices, EQ, mute, volume, visualisation, metadata, media controls, scrobbling preserve behaviour | **Partial** — implemented and unit-tested; only audible playback and bitrate confirmed on real hardware. See `TESTING_NEEDED.md` |
+| Network consolidation inventory complete, framework-owned exceptions explicit | Met — exceptions are webview `<img>` artwork and the updater plugin's own download |
+| MPV and capture-specific dependencies/configuration removed from production | Met |
+| Windows updater and all supported desktop bundles validated | **Not met** — no Windows or macOS testing has occurred |
+| Platform matrix has final manual hardware evidence for Windows/macOS | **Not met** — both remain PENDING MANUAL VALIDATION |
+| Progress report names exact tests, limitations and unavailable platform evidence | Met |
+
+### Dependency duplication, as the plan requires documenting
+
+`Cargo.lock` contains **two Reqwest versions**: 0.12.28 (the app, pinned) and 0.13.4, pulled by
+`tauri-plugin-updater 2.10.1`. This predates the migration and is not introduced by it.
+
+Removing it would mean either upgrading the app to Reqwest 0.13 purely to match a transitive
+dependency — which the plan explicitly warns against doing blindly — or replacing the updater
+plugin, which the plan equally warns against. The cost is a second HTTP client compiled into
+the binary and used only for update downloads. Left as-is, deliberately.
 
 ## Validation rules
 

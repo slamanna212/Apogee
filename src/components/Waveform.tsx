@@ -12,13 +12,18 @@ interface WaveformProps {
 }
 
 /**
- * Real per-band levels come from the Rust "waveform-levels" event, which
- * captures actual system audio output and runs a real FFT (src-tauri/src/waveform.rs)
- * - mpv's own af-metadata mechanism was tested and proven unable to expose
- * more than one overall level, since ffmpeg's amix/merge filters drop
- * per-branch metadata. If no capture backend is available for this
- * platform/session, bars fall back to a synthetic idle-breathing animation
- * so the bar never looks broken - but whenever real levels are flowing,
+ * Real per-band levels come from the Rust "waveform-levels" event. The playback
+ * engine taps its own decoded PCM after EQ and volume and runs an FFT over it
+ * (src-tauri/playback-core/src/analysis.rs), so the bars show what Apogee is
+ * sending to the output device rather than everything the machine is playing.
+ *
+ * Historical: this used to capture system audio through a loopback device,
+ * because mpv's af-metadata mechanism was tested and proven unable to expose
+ * more than one overall level (ffmpeg's amix/merge filters drop per-branch
+ * metadata). That capture path is gone, along with its permission requirements.
+ *
+ * While nothing is playing, bars fall back to a synthetic idle-breathing
+ * animation so they never look broken - but whenever real levels are flowing,
  * that's exactly what's rendered.
  */
 export function Waveform({ active, bands = 8, size = 'md' }: WaveformProps) {

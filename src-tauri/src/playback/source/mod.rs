@@ -51,9 +51,13 @@ const MAX_PROBED_PLAYLIST_BYTES: usize = 2 * 1024 * 1024;
 /// `reqwest`/`hls_runtime` error that embedded a request URL as text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceError {
-    /// Transport/timeout/redirect/status/body-bound failure from
-    /// `NetworkService`.
+    /// Transport/timeout/redirect/body-bound failure from `NetworkService`.
     Network(String),
+    /// The server answered with an unsuccessful status.
+    ///
+    /// Kept separate from `Network` so the status code survives: whether retrying can
+    /// possibly help depends on it, and the body often carries the actual reason.
+    Status { status: u16, detail: Option<String> },
     /// Bytes were conclusively identified as something this app does not
     /// play (yet), or detection could not resolve them at all.
     Unsupported(String),
@@ -73,6 +77,12 @@ impl std::fmt::Display for SourceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Network(message) => write!(f, "network error: {message}"),
+            // Lead with the server's own reason when it gave one: "No streams assigned to
+            // channel" tells the user what to fix, where "503" does not.
+            Self::Status { status, detail } => match detail {
+                Some(detail) => write!(f, "{detail} (HTTP {status})"),
+                None => write!(f, "server returned HTTP {status}"),
+            },
             Self::Unsupported(message) => write!(f, "unsupported source: {message}"),
             Self::Demux(message) => write!(f, "stream demux error: {message}"),
             Self::StreamEndedDuringDetection { examined } => write!(
@@ -92,6 +102,10 @@ impl From<NetworkError> for SourceError {
     fn from(error: NetworkError) -> Self {
         match error {
             NetworkError::Cancelled => Self::Cancelled,
+            NetworkError::Status { status, detail } => Self::Status {
+                status: status.as_u16(),
+                detail: detail.map(|d| redact_text(&d)),
+            },
             other => Self::Network(redact_text(&other.to_string())),
         }
     }
@@ -866,6 +880,53 @@ mod tests {
         assert!(
             elapsed < Duration::from_secs(2),
             "cancellation during a segment fetch did not return promptly: took {elapsed:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod status_error_tests {
+    use super::*;
+
+    #[test]
+    fn a_server_reason_leads_the_message() {
+        // The case that cost real debugging time: Dispatcharr answers a channel with no
+        // upstream configured with a 503 whose body says exactly that, and reporting only
+        // "503 Service Unavailable" hid it.
+        let error = SourceError::Status {
+            status: 503,
+            detail: Some("No streams assigned to channel".to_string()),
+        };
+        let message = error.to_string();
+        assert!(
+            message.starts_with("No streams assigned to channel"),
+            "the server's reason must lead: {message}"
+        );
+        assert!(
+            message.contains("503"),
+            "the status is still useful: {message}"
+        );
+    }
+
+    #[test]
+    fn a_bare_status_still_reads_sensibly() {
+        let error = SourceError::Status {
+            status: 502,
+            detail: None,
+        };
+        assert_eq!(error.to_string(), "server returned HTTP 502");
+    }
+
+    #[test]
+    fn a_credential_in_an_error_body_never_survives() {
+        let error = SourceError::from(crate::network::NetworkError::Status {
+            status: reqwest::StatusCode::FORBIDDEN,
+            detail: Some("denied for http://host/live/user/hunter2/1.ts".to_string()),
+        });
+        let message = error.to_string();
+        assert!(
+            !message.contains("hunter2"),
+            "leaked a credential: {message}"
         );
     }
 }

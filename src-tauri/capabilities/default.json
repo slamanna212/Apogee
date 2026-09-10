@@ -27,13 +27,6 @@
     {
       "identifier": "opener:allow-open-url",
       "allow": [{ "url": "https://www.last.fm/api/auth/**" }]
-    },
-    {
-      "identifier": "http:default",
-      "allow": [
-        { "url": "http://*:*/*" },
-        { "url": "https://*:*/*" }
-      ]
     }
   ]
 }

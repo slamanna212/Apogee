@@ -1,6 +1,5 @@
-#[cfg(windows)]
-use crate::mpv::{self, MpvState};
 use serde::Serialize;
+use serde_json::Value;
 use tauri::{ipc::Channel, Manager, ResourceId, Runtime, Webview};
 use tauri_plugin_updater::UpdaterExt;
 use url::Url;
@@ -93,14 +92,15 @@ pub enum DownloadEvent {
 /// On every platform except Windows this just downloads the bytes and hands
 /// them to the plugin's own `Update::install`, unchanged. On Windows it
 /// deliberately bypasses the plugin's `Update::install`/`install_inner`:
-/// that installs by calling `ShellExecuteW` (ignoring its return value) and
-/// then unconditionally calling `std::process::exit(0)` right after - and
-/// because Apogee puts its own process in a Windows Job Object configured to
-/// kill everything in the job when the job's last handle closes (see
-/// `mpv::create_process_job`), the installer process it just launched joins
-/// that same job by default and gets killed in the same instant Apogee exits,
-/// before it can even show its progress window. See `install_windows` below
-/// for the fix.
+/// that installs by calling `ShellExecuteW` while ignoring its return value
+/// and then unconditionally calls `std::process::exit(0)`, so a launch
+/// failure makes the app silently vanish with no error and no update. See
+/// `install_windows` below, which reports that failure instead.
+///
+/// This path originally also existed to escape Apogee's Job Object, which was
+/// created to kill MPV on exit. That job object is gone with MPV, so the
+/// breakaway flag has been removed; the launch-failure reporting is why the
+/// custom path remains.
 #[tauri::command]
 pub async fn download_and_install_update<R: Runtime>(
     app_handle: tauri::AppHandle<R>,
@@ -152,30 +152,26 @@ pub async fn download_and_install_update<R: Runtime>(
     }
 }
 
-/// Writes the downloaded installer to a temp file and launches it directly
-/// (instead of via the plugin's `ShellExecuteW` call), passing
-/// `CREATE_BREAKAWAY_FROM_JOB` so the installer process doesn't join
-/// Apogee's Job Object and can survive Apogee's exit - see
-/// `mpv::create_process_job` for the other half of this fix (the job must
-/// also be created with `JOB_OBJECT_LIMIT_BREAKAWAY_OK` for this flag to do
-/// anything).
+/// Writes the downloaded installer to a temp file and launches it directly,
+/// instead of via the plugin's `ShellExecuteW` call.
+///
+/// No longer passes `CREATE_BREAKAWAY_FROM_JOB`: that existed solely to escape
+/// the Job Object Apogee used to create so MPV died with the app. With MPV and
+/// the job object both removed, the installer has no job to break away from and
+/// the flag would be a no-op.
 ///
 /// `/P /R` reproduces the plugin's documented default `Passive` install mode
 /// (Apogee doesn't override `plugins.updater.windows.installMode`); `/UPDATE`
-/// is what the plugin adds unconditionally too. Only kills mpv and exits
-/// Apogee *after* confirming the installer process actually started - unlike
-/// the plugin's own path, a launch failure here is returned as a normal
-/// error instead of the app silently vanishing.
+/// is what the plugin adds unconditionally too. Apogee exits only *after*
+/// confirming the installer process actually started - unlike the plugin's own
+/// path, a launch failure here is returned as a normal error instead of the app
+/// silently vanishing.
 #[cfg(windows)]
 fn install_windows<R: Runtime>(
     app_handle: &tauri::AppHandle<R>,
     version: &str,
     bytes: &[u8],
 ) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-
-    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
-
     let temp_dir = std::env::temp_dir().join(format!("apogee-updater-{version}"));
     std::fs::create_dir_all(&temp_dir)
         .map_err(|e| format!("couldn't create temp dir for the update installer: {e}"))?;
@@ -187,12 +183,10 @@ fn install_windows<R: Runtime>(
 
     match std::process::Command::new(&installer_path)
         .args(["/P", "/R", "/UPDATE"])
-        .creation_flags(CREATE_BREAKAWAY_FROM_JOB)
         .spawn()
     {
         Ok(child) => {
             log::info!("update installer launched (pid {})", child.id());
-            mpv::kill_blocking(&app_handle.state::<MpvState>());
             app_handle.cleanup_before_exit();
             app_handle.exit(0);
             Ok(())
@@ -203,6 +197,83 @@ fn install_windows<R: Runtime>(
             Err(format!(
         "Couldn't start the installer ({e}). Try downloading it manually from the GitHub releases page."
       ))
+        }
+    }
+}
+
+/// Fetches the repository's release list.
+///
+/// Moved out of the frontend so it goes through the shared `NetworkService` like every
+/// other request. GitHub has no "latest release including prereleases" alias, so the
+/// channel is resolved by walking the list; that filtering stays in the frontend, which
+/// already has the version-comparison logic and its tests.
+#[tauri::command]
+pub async fn github_releases(
+    network: tauri::State<'_, crate::network::NetworkService>,
+    repo: String,
+) -> Result<Value, String> {
+    // The repo comes from a frontend constant, but validate anyway: it is interpolated
+    // into a path, and "owner/name" is the only shape that can be correct.
+    let mut parts = repo.split('/');
+    let valid = matches!((parts.next(), parts.next(), parts.next()), (Some(o), Some(n), None)
+        if !o.is_empty()
+            && !n.is_empty()
+            && repo
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/')));
+    if !valid {
+        return Err("invalid repository identifier".to_string());
+    }
+
+    let url = format!("https://api.github.com/repos/{repo}/releases");
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let body = network
+        .fetch_json_with_headers(&url, &[("Accept", "application/vnd.github+json")], &cancel)
+        .await
+        .map_err(|error| match error {
+            crate::network::NetworkError::Status { status, .. } => {
+                format!("GitHub API request failed: {}", status.as_u16())
+            }
+            other => format!(
+                "GitHub API request failed: {}",
+                crate::network::redact_text(&other.to_string())
+            ),
+        })?;
+    serde_json::from_slice(&body.bytes).map_err(|_| "GitHub API returned invalid JSON".to_string())
+}
+
+#[cfg(test)]
+mod repo_tests {
+    /// Mirrors the validation in `github_releases`; kept in step by construction.
+    fn valid(repo: &str) -> bool {
+        let mut parts = repo.split('/');
+        matches!((parts.next(), parts.next(), parts.next()), (Some(o), Some(n), None)
+            if !o.is_empty()
+                && !n.is_empty()
+                && repo
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/')))
+    }
+
+    #[test]
+    fn accepts_an_ordinary_owner_and_name() {
+        assert!(valid("slamanna212/Apogee"));
+        assert!(valid("some-org/some_repo.js"));
+    }
+
+    #[test]
+    fn rejects_anything_that_could_escape_the_path() {
+        for bad in [
+            "owner",            // no name
+            "owner/name/extra", // too many segments
+            "owner/",           // empty name
+            "/name",            // empty owner
+            "owner/name?x=1",   // query injection
+            "owner/name#frag",  // fragment
+            "owner/na me",      // space
+            "../../etc",        // traversal
+        ] {
+            assert!(!valid(bad), "should have been rejected: {bad}");
         }
     }
 }

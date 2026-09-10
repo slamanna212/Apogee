@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import { Channel, invoke } from '@tauri-apps/api/core';
-import { fetch } from '@tauri-apps/plugin-http';
 import { Update, type DownloadEvent } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import type { UpdateChannel } from './settingsStore';
@@ -66,13 +65,9 @@ const MAX_CHANGELOG_ENTRIES = 10;
 // unauthenticated requests) release list ourselves rather than relying on
 // the static endpoint baked into tauri.conf.json.
 async function fetchQualifyingReleases(channel: UpdateChannel): Promise<GithubRelease[]> {
-  const response = await fetch(`https://api.github.com/repos/${REPO}/releases`, {
-    headers: { Accept: 'application/vnd.github+json' },
-  });
-  if (!response.ok) {
-    throw new Error(`GitHub API request failed: ${response.status}`);
-  }
-  const releases = (await response.json()) as GithubRelease[];
+  // Fetched in Rust so it shares the app's single HTTP client; the channel filtering
+  // stays here alongside the version-comparison logic and its tests.
+  const releases = (await invoke('github_releases', { repo: REPO })) as GithubRelease[];
   return releases.filter((r) => !r.draft && (channel === 'beta' || !r.prerelease));
 }
 
@@ -148,12 +143,13 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
       const flush = () => set({ progress: { downloaded, total } });
 
       // Routed through our own `download_and_install_update` command rather
-      // than the plugin's `Update.downloadAndInstall()` - on Windows, the
-      // plugin's own install step launches the installer in a way that gets
-      // silently killed by Apogee's mpv-guarding Job Object the instant the
-      // app exits afterward. See src-tauri/src/updater.rs for the fix; the
-      // wire shape of these events matches the plugin's own DownloadEvent
-      // exactly, so the handling below is unchanged.
+      // than the plugin's `Update.downloadAndInstall()`: on Windows the plugin
+      // ignores the installer launch's return value and then exits the app
+      // unconditionally, so a failed launch leaves you with no installer, no
+      // update and no error. Ours reports it. (It also used to work around the
+      // mpv-guarding Job Object, which no longer exists.) See
+      // src-tauri/src/updater.rs; the wire shape of these events matches the
+      // plugin's own DownloadEvent exactly, so the handling below is unchanged.
       const onEvent = new Channel<DownloadEvent>();
       onEvent.onmessage = (event) => {
         if (event.event === 'Started') {

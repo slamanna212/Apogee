@@ -2,7 +2,6 @@ mod discord_rpc;
 mod lastfm;
 mod logs;
 mod media_session;
-mod mpv;
 // Shared networking foundation for the in-process audio engine (Symphonia
 // migration M1). Not wired into any Tauri command yet - nothing outside its
 // own tests calls it until M2 builds the playback engine on top of it, so
@@ -15,12 +14,10 @@ mod notifications;
 // own tests calls it until M3 builds the controller on top of it.
 mod playback;
 mod secrets;
+mod stellar;
 mod updater;
-// Superseded by the engine's in-process PCM tap and no longer started. Retained
-// only so the migration can be reverted in one step; M5 deletes it along with MPV.
-#[allow(dead_code)]
-mod waveform;
 mod window_state;
+mod xtream;
 
 use tauri::Manager;
 
@@ -47,16 +44,16 @@ pub fn run() {
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5))
                 .build(),
         )
-        .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(mpv::MpvState::default())
         .manage(
-            playback::commands::PlayerState::new()
-                .expect("audio playback state should initialise"),
+            playback::commands::PlayerState::new().expect("audio playback state should initialise"),
         )
+        // One HTTP layer for the whole app. Shared with the playback engine so stream and
+        // API traffic use the same TLS, redirect and redaction policy.
+        .manage(network::NetworkService::new().expect("network service should initialise"))
         .manage(discord_rpc::DiscordRpcState::default())
         .invoke_handler(tauri::generate_handler![
             playback::commands::player_play,
@@ -69,16 +66,11 @@ pub fn run() {
             playback::commands::player_migrate_device,
             playback::commands::player_set_visualizer,
             playback::commands::player_get_snapshot,
-            mpv::mpv_load,
-            mpv::mpv_stop,
-            mpv::mpv_set_volume,
-            mpv::mpv_set_equalizer,
-            mpv::mpv_set_property,
-            mpv::mpv_get_property,
-            mpv::mpv_list_audio_devices,
-            mpv::mpv_get_stderr_tail,
-            waveform::waveform_set_device,
-            waveform::waveform_set_active,
+            xtream::xtream_get_live_categories,
+            xtream::xtream_get_live_streams,
+            stellar::stellar_now_playing,
+            stellar::stellar_channels,
+            stellar::stellar_history,
             secrets::secrets_set,
             secrets::secrets_get,
             secrets::secrets_delete,
@@ -98,6 +90,7 @@ pub fn run() {
             discord_rpc::discord_rpc_set_activity,
             discord_rpc::discord_rpc_clear_activity,
             discord_rpc::discord_rpc_disconnect,
+            updater::github_releases,
             updater::check_update_at_endpoint,
             updater::download_and_install_update,
             logs::export_log_file,
@@ -118,26 +111,11 @@ pub fn run() {
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
             log::info!("startup: desktop updater initialized");
 
-            // Ensures mpv can never outlive Apogee on Windows, regardless of how
-            // this process exits (crash, force-quit, or the updater's
-            // `std::process::exit`) - see `mpv::create_process_job`. The returned
-            // `Job` must be kept alive for the process lifetime, so it's stashed in
-            // managed state rather than dropped at the end of this closure.
-            // macOS has no equivalent primitive - see the comment in
-            // `mpv::spawn_mpv` for why that gap is accepted rather than solved.
-            #[cfg(windows)]
-            if let Some(job) = mpv::create_process_job() {
-                app.manage(job);
-            }
+            // No Windows Job Object any more. It existed solely to guarantee the mpv
+            // subprocess died with Apogee; audio is now decoded in-process, so there is
+            // no child process to outlive us and nothing to contain.
 
-            // System-audio capture is no longer started. The spectrum visualizer now
-            // taps the playback engine's own PCM (post-EQ, post-volume), so capturing
-            // the machine's output is both unnecessary and less accurate - it picked up
-            // every other application too. The module is left in place until M5 removes
-            // it wholesale along with MPV.
-            log::info!("startup: spectrum uses the in-process PCM tap; audio capture disabled");
-
-            match media_session::init(&app.handle()) {
+            match media_session::init(app.handle()) {
                 Ok(controls) => {
                     app.manage(media_session::MediaSessionState(std::sync::Mutex::new(
                         Some(controls),
@@ -159,7 +137,8 @@ pub fn run() {
     log::info!("startup: entering application event loop");
     app.run(|app_handle, event| {
         if let tauri::RunEvent::Exit = event {
-            mpv::kill_on_exit(&app_handle.state::<mpv::MpvState>());
+            // Playback owns no subprocess now; dropping the player state stops the audio
+            // thread and cancels in-flight network work on its own.
             discord_rpc::clear_on_exit(&app_handle.state::<discord_rpc::DiscordRpcState>());
         }
     });

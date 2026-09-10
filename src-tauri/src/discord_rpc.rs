@@ -117,7 +117,7 @@ pub async fn discord_rpc_disconnect(state: State<'_, DiscordRpcState>) -> Result
 }
 
 /// Best-effort, synchronous, fire-and-forget teardown for `RunEvent::Exit`,
-/// mirroring `mpv::kill_on_exit`'s `try_lock` pattern.
+/// using a `try_lock` so a poisoned or contended mutex cannot hang shutdown.
 pub fn clear_on_exit(state: &DiscordRpcState) {
     if let Ok(mut guard) = state.0.try_lock() {
         if let Some(mut client) = guard.take() {

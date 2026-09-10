@@ -1,8 +1,8 @@
 //! Adversarial timing around session identity. These are the races the plan calls out.
 
 use apogee_playback_core::session::{
-    BufferingReason, Controller, ErrorClass, MAX_CONNECT_ATTEMPTS, Next, PlaybackState,
-    STABLE_PLAY_RESET_MS,
+    BufferingReason, CONNECT_BUDGET_MS, Controller, ErrorClass, MAX_CONNECT_ATTEMPTS,
+    MAX_RETRY_DELAY_MS, Next, PlaybackState, RETRY_DELAY_MS, STABLE_PLAY_RESET_MS, retry_delay_ms,
 };
 
 #[test]
@@ -126,16 +126,25 @@ fn transient_failures_retry_a_bounded_number_of_times() {
     let mut c = Controller::new();
     let g = c.play("station-a");
 
+    // Slow failures: each attempt consumes real time, so the attempt count and the
+    // wall-clock budget run out at roughly the same point.
     let mut retries = 0;
+    let mut now = 0u64;
     loop {
-        match c.on_error(g, ErrorClass::Transient, "timed out", 0) {
-            Some(Next::Retry { .. }) => retries += 1,
+        match c.on_error(g, ErrorClass::Transient, "timed out", now) {
+            Some(Next::Retry { delay_ms, .. }) => {
+                retries += 1;
+                now += delay_ms + 30_000; // a long, stalling attempt
+            }
             Some(Next::GiveUp) => break,
             None => panic!("controller stopped accepting its own generation"),
         }
-        assert!(retries < 10, "retries are not bounded");
+        assert!(retries < 20, "retries are not bounded");
     }
-    assert_eq!(retries as u32, MAX_CONNECT_ATTEMPTS - 1);
+    assert!(
+        retries as u32 >= MAX_CONNECT_ATTEMPTS - 1,
+        "gave up after only {retries} retries"
+    );
     assert_eq!(c.state(), PlaybackState::Failed);
     assert!(
         c.snapshot().error.is_some(),
@@ -198,16 +207,17 @@ fn the_retry_budget_refills_only_after_sustained_playback() {
 
 #[test]
 fn a_flapping_stream_still_terminates() {
-    // Connect, play briefly, drop; repeatedly. Must not retry forever.
+    // Connect, play briefly, drop; repeatedly. Must not retry forever. Brief playback does
+    // not refill the budget, so both limits eventually run out.
     let mut c = Controller::new();
     let g = c.play("station-a");
     let mut now = 0u64;
-    for _ in 0..20 {
+    for _ in 0..200 {
         c.on_audible(g, now);
         now += 1_000;
         match c.on_error(g, ErrorClass::Transient, "dropped", now) {
             Some(Next::GiveUp) => return,
-            Some(Next::Retry { .. }) => now += 1_500,
+            Some(Next::Retry { delay_ms, .. }) => now += delay_ms,
             None => panic!("unexpected rejection"),
         }
     }
@@ -271,5 +281,78 @@ fn the_selected_device_survives_a_station_change() {
         c.snapshot().device.as_deref(),
         Some("USB Audio"),
         "device preference is not per-session"
+    );
+}
+
+#[test]
+fn an_instantly_failing_endpoint_still_gets_the_full_wall_clock_budget() {
+    // The regression this guards. A 503 returned while a backend is still starting a stream
+    // fails in milliseconds. Counting attempts alone burned all four inside about five
+    // seconds and gave up long before the stream could have come up. Measured against a
+    // real backend: four attempts spanned 14:36:28 to 14:36:33.
+    let mut c = Controller::new();
+    let g = c.play("station-a");
+
+    let mut now = 0u64;
+    let mut retries = 0;
+    loop {
+        match c.on_error(g, ErrorClass::Transient, "HTTP 503", now) {
+            Some(Next::Retry { delay_ms, .. }) => {
+                retries += 1;
+                now += delay_ms; // the request itself costs no measurable time
+            }
+            Some(Next::GiveUp) => break,
+            None => panic!("unexpected rejection"),
+        }
+        assert!(retries < 200, "must still terminate");
+    }
+    assert!(
+        now >= CONNECT_BUDGET_MS,
+        "gave up after only {now}ms; the budget is {CONNECT_BUDGET_MS}ms"
+    );
+    assert!(
+        retries as u32 > MAX_CONNECT_ATTEMPTS,
+        "only {retries} retries when every failure was free"
+    );
+}
+
+#[test]
+fn backoff_grows_and_is_capped() {
+    assert_eq!(retry_delay_ms(1), RETRY_DELAY_MS);
+    assert!(retry_delay_ms(2) > retry_delay_ms(1), "delay should grow");
+    assert!(retry_delay_ms(3) > retry_delay_ms(2));
+    for attempt in 1..50 {
+        let delay = retry_delay_ms(attempt);
+        assert!(
+            delay >= RETRY_DELAY_MS,
+            "attempt {attempt} delay {delay} below the floor"
+        );
+        assert!(
+            delay <= MAX_RETRY_DELAY_MS,
+            "attempt {attempt} delay {delay} above the cap"
+        );
+    }
+}
+
+#[test]
+fn a_fast_failing_endpoint_is_not_hammered() {
+    // Backoff has to keep the request count inside the budget modest, or restoring the
+    // wall-clock window would just turn one bug into a different one.
+    let mut c = Controller::new();
+    let g = c.play("station-a");
+    let mut now = 0u64;
+    let mut requests = 0;
+    while let Some(Next::Retry { delay_ms, .. }) =
+        c.on_error(g, ErrorClass::Transient, "HTTP 503", now)
+    {
+        requests += 1;
+        now += delay_ms;
+        if requests > 500 {
+            break;
+        }
+    }
+    assert!(
+        requests < 40,
+        "{requests} requests inside {CONNECT_BUDGET_MS}ms is hammering the server"
     );
 }

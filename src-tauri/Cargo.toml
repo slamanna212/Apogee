@@ -33,7 +33,6 @@ log = "=0.4.33"
 tauri = { version = "=2.11.5", features = ["macos-private-api"] }
 tauri-plugin-log = "=2.9.0"
 tauri-plugin-dialog = "=2.7.2"
-tauri-plugin-http = "=2.5.9"
 tauri-plugin-store = "=2.4.4"
 tauri-plugin-updater = "=2.10.1"
 tauri-plugin-process = "=2.3.1"
@@ -41,7 +40,6 @@ tauri-plugin-opener = "=2.5.4"
 tokio = { version = "=1.53.0", features = ["process", "net", "io-util", "rt", "time", "macros", "sync", "fs"] }
 souvlaki = "=0.8.3"
 discord-rich-presence = "=1.1.0"
-rustfft = "=6.4.1"
 url = "=2.5.8"
 time = { version = "=0.3.54", features = ["parsing", "formatting"] }
 reqwest = { version = "=0.12.28", default-features = false, features = ["json", "rustls-tls", "stream"] }
@@ -56,19 +54,16 @@ bytes = "=1.12.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "=3.6.3", features = ["sync-secret-service"] }
-libc = "=0.2.186"
 notify-rust = "=4.18.0"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "=3.6.3", features = ["windows-native"] }
-win32job = "=2.0.3"
 tauri-winrt-notification = "=0.8.1"
 windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "=3.6.3", features = ["apple-native"] }
 notify-rust = { version = "=4.18.0", features = ["preview-macos-un"] }
-libc = "=0.2.186"
 objc2 = "=0.6.4"
 objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["NSWindow"] }
 objc2-foundation = { version = "=0.3.2", features = ["NSArray", "NSString", "NSObject"] }

@@ -464,9 +464,16 @@ fn apply_settings(equalizer: &mut Equalizer, settings: &AudioSettings) {
 }
 
 /// Whether an error is worth retrying. Authentication and unsupported content are not.
+/// Whether retrying could possibly help.
+///
+/// A 4xx is the server saying the request itself is wrong - bad credentials, an unknown
+/// channel - and repeating it unchanged cannot succeed. A 5xx is the server saying it could
+/// not serve the request *now*, which is exactly the upstream spin-up case the plan
+/// documents, so those stay retryable.
 fn classify(error: &SourceError) -> ErrorClass {
     match error {
         SourceError::Unsupported(_) => ErrorClass::Permanent,
+        SourceError::Status { status, .. } if (400..500).contains(status) => ErrorClass::Permanent,
         _ => ErrorClass::Transient,
     }
 }

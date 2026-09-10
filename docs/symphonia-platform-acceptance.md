@@ -7,7 +7,7 @@ Created during M0. Updated after milestone scoping. No physical audio test has b
 | Platform | Build / headless evidence | Manual tester/device | Hardware status |
 | --- | --- | --- | --- |
 | Linux desktop | Local checks green; release runner rapture-apogee | slamanna212, this dev box | **AUDIBLE PLAYBACK CONFIRMED 2026-09-10** |
-| Windows x64 | Hosted native build configured; no migration build tested | UNASSIGNED | PENDING MANUAL VALIDATION |
+| Windows x64 | Hosted native build configured; not yet built since MPV removal | User has a Windows machine; will test dev builds before release | PENDING MANUAL VALIDATION — **includes the updater**, see TESTING_NEEDED.md |
 | macOS Apple Silicon | Hosted universal build configured; no migration build tested | UNASSIGNED | PENDING MANUAL VALIDATION |
 | macOS Intel | Universal slice does not prove execution | UNASSIGNED | PENDING MANUAL VALIDATION |
 

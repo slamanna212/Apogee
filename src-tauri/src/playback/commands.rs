@@ -107,7 +107,7 @@ impl TauriSink {
 impl EventSink for TauriSink {
     fn emit(&self, event: EngineEvent) {
         let state = self.app.state::<PlayerState>();
-        let mut retry: Option<(Generation, String)> = None;
+        let mut retry: Option<(Generation, String, u64)> = None;
 
         let snapshot = {
             let mut inner = state.inner.lock().expect("player state poisoned");
@@ -145,10 +145,18 @@ impl EventSink for TauriSink {
                     let next = inner
                         .controller
                         .on_error(generation, class, message, now_ms());
-                    if let (Some(Next::Retry { extension, .. }), Some(request)) =
-                        (next, inner.request.clone())
+                    if let (
+                        Some(Next::Retry {
+                            extension,
+                            delay_ms,
+                            ..
+                        }),
+                        Some(request),
+                    ) = (next, inner.request.clone())
                     {
-                        retry = Some((generation, request.url_for(extension)));
+                        // The controller decides the delay: it backs off so a
+                        // fast-failing endpoint is not hammered across the connect budget.
+                        retry = Some((generation, request.url_for(extension), delay_ms));
                     }
                 }
             }
@@ -156,8 +164,8 @@ impl EventSink for TauriSink {
         };
         self.publish(snapshot);
 
-        if let Some((generation, url)) = retry {
-            schedule_retry(self.app.clone(), generation, url);
+        if let Some((generation, url, delay_ms)) = retry {
+            schedule_retry(self.app.clone(), generation, url, delay_ms);
         }
     }
 }
@@ -171,12 +179,9 @@ fn now_ms() -> u64 {
 }
 
 /// Restarts a failed attempt after the retry delay, if the session is still current.
-fn schedule_retry(app: AppHandle, generation: Generation, url: String) {
+fn schedule_retry(app: AppHandle, generation: Generation, url: String, delay_ms: u64) {
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(
-            apogee_playback_core::session::RETRY_DELAY_MS,
-        ))
-        .await;
+        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
 
         let state = app.state::<PlayerState>();
 

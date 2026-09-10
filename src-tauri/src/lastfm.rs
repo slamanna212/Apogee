@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -9,7 +8,6 @@ use crate::secrets;
 // One shared client (connection pool + keep-alive) reused across every
 // now-playing update and scrobble, instead of a fresh Client - and thus a new
 // TCP + TLS handshake - per call.
-static HTTP: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
 const API_URL: &str = "https://ws.audioscrobbler.com/2.0/";
 const AUTH_URL: &str = "https://www.last.fm/api/auth/";
@@ -132,14 +130,22 @@ async fn call(mut params: BTreeMap<String, String>) -> Result<Value, LastFmError
     params.insert("api_sig".into(), api_sig);
     params.insert("format".into(), "json".into());
 
-    let response = HTTP
-        .post(API_URL)
-        .form(&params)
-        .send()
+    // Shared NetworkService rather than a private client, so Last.fm inherits the same
+    // TLS, redirect and scheme policy as the rest of the app.
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let response = crate::network::NetworkService::shared()
+        .post_form(API_URL, &params, &cancel)
         .await
-        .map_err(|error| LastFmError::transport(format!("Could not reach Last.fm: {error}")))?;
-    let status = response.status();
-    let value = response.json::<Value>().await.map_err(|_| {
+        .map_err(|error| {
+            // A transport error's Display embeds the URL; Last.fm's carries no credentials
+            // (the signature is in the body), but redact anyway rather than rely on that.
+            LastFmError::transport(format!(
+                "Could not reach Last.fm: {}",
+                crate::network::redact_text(&error.to_string())
+            ))
+        })?;
+    let status = response.status;
+    let value: Value = serde_json::from_slice(&response.bytes).map_err(|_| {
         LastFmError::transport(format!(
             "Last.fm returned an unreadable response ({status})"
         ))

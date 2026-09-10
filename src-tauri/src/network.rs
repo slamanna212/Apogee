@@ -1,7 +1,5 @@
-//! Shared HTTP foundation for the in-process audio engine (Symphonia
-//! migration milestone M1 - "media networking only", see
-//! `SYMPHONIA_PLAYBACK_PLAN.md` section 6 and
-//! `docs/symphonia-migration-progress.md`).
+//! The application's HTTP layer (see `SYMPHONIA_PLAYBACK_PLAN.md` section 6
+//! and `docs/symphonia-migration-progress.md`).
 //!
 //! [`NetworkService`] owns one reused [`reqwest::Client`] per traffic
 //! profile (JSON API / artwork / continuous TS / HLS playlist / HLS
@@ -10,12 +8,17 @@
 //! be wrong for at least one of them. All clients share TLS (Rustls, never
 //! disabled), proxy, and User-Agent construction via [`base_builder`].
 //!
-//! This module is deliberately **not** wired into any Tauri command yet;
-//! nothing in the app calls it until milestone M2 builds the playback
-//! engine on top of it. Xtream, StellarTunerLog, Last.fm, and artwork
-//! caching stay on their existing clients (`lastfm.rs`, `notifications.rs`,
-//! `tauri-plugin-http`) for this milestone - see the migration progress log
-//! for why that porting is deferred.
+//! This is the only HTTP stack in the app. `tauri-plugin-http` has been
+//! removed, and Xtream (`xtream.rs`), StellarTunerLog (`stellar.rs`),
+//! Last.fm (`lastfm.rs`), notification artwork (`notifications.rs`), the
+//! GitHub release list (`updater.rs`) and the playback engine all go through
+//! here. Two instances exist and they are the same configuration: one managed
+//! by Tauri for command handlers, and [`NetworkService::shared`] for callers
+//! that have no `State` to thread through.
+//!
+//! The exceptions, which are framework-owned rather than application-owned:
+//! remote channel artwork loaded by `<img>` tags in the webview, and the
+//! updater plugin's own download of a release artifact.
 //!
 //! # The most important correctness requirement here
 //!
@@ -80,7 +83,15 @@ pub enum NetworkError {
     /// A response body exceeded the profile's configured byte bound.
     BodyTooLarge { limit: usize },
     /// The response status was not successful (2xx).
-    Status(StatusCode),
+    /// An unsuccessful HTTP status, with any short error message the server sent.
+    ///
+    /// The body matters: a proxy in front of the provider answers a request for a channel
+    /// it cannot serve with a 503 whose body says *why*, e.g. "No streams assigned to
+    /// channel". Discarding that turns an actionable message into an opaque status code.
+    Status {
+        status: StatusCode,
+        detail: Option<String>,
+    },
     /// The continuous-TS profile detected no data for longer than its
     /// configured stall timeout, despite the connection never closing.
     Stalled,
@@ -96,7 +107,10 @@ impl fmt::Display for NetworkError {
             Self::InvalidUrl(message) => write!(f, "invalid URL: {message}"),
             Self::Cancelled => f.write_str("cancelled"),
             Self::BodyTooLarge { limit } => write!(f, "response body exceeded {limit} bytes"),
-            Self::Status(status) => write!(f, "unsuccessful response status {status}"),
+            Self::Status { status, detail } => match detail {
+                Some(detail) => write!(f, "{detail} (HTTP {})", status.as_u16()),
+                None => write!(f, "unsuccessful response status {status}"),
+            },
             Self::Stalled => f.write_str("no data received before the stall timeout"),
             Self::Transport(message) => write!(f, "network error: {message}"),
         }
@@ -350,7 +364,9 @@ impl Default for NetworkServiceConfig {
             json_api_timeout: Duration::from_secs(10),
             json_api_max_body_bytes: 2 * 1024 * 1024,
             artwork_timeout: Duration::from_secs(15),
-            artwork_max_body_bytes: 8 * 1024 * 1024,
+            // Matches the cap the notification artwork cache enforced before it moved
+            // here; artwork is thumbnail-sized, and a larger body is a sign of trouble.
+            artwork_max_body_bytes: 3 * 1024 * 1024,
             // Matches the plan's documented current direct-TS
             // connect-to-play default.
             continuous_ts_connect_timeout: Duration::from_secs(20),
@@ -397,7 +413,53 @@ pub struct FetchedBody {
     pub bytes: Vec<u8>,
 }
 
+/// Process-wide instance.
+///
+/// Tauri also manages a clone for command handlers, but Last.fm and notification artwork
+/// are reached from places that have no `State` to thread through. Both refer to this, so
+/// there is genuinely one HTTP layer rather than one per caller.
+static SHARED: std::sync::OnceLock<NetworkService> = std::sync::OnceLock::new();
+
 impl NetworkService {
+    /// The shared instance, created on first use.
+    ///
+    /// Falls back to a default-configured service if construction ever fails, because
+    /// losing artwork or scrobbling is better than panicking during playback.
+    pub fn shared() -> &'static NetworkService {
+        SHARED.get_or_init(|| {
+            Self::new().unwrap_or_else(|e| {
+                log::warn!("network service fell back to defaults: {e}");
+                Self::with_config(NetworkServiceConfig::default())
+                    .expect("a default network service must be constructible")
+            })
+        })
+    }
+
+    /// POSTs form-encoded parameters and reads a bounded JSON response.
+    ///
+    /// Last.fm's API is form-encoded and signed, so it cannot use the GET path.
+    pub async fn post_form(
+        &self,
+        url: &str,
+        form: &(impl serde::Serialize + ?Sized),
+        cancel: &CancellationToken,
+    ) -> Result<FetchedBody, NetworkError> {
+        let parsed = parse_allowed_url(url)?;
+        let request = self.json_api.post(parsed).form(form);
+        let response = tokio::select! {
+            biased;
+            () = cancel.cancelled() => return Err(NetworkError::Cancelled),
+            result = request.send() => result.map_err(transport_error)?,
+        };
+        // Last.fm signals API errors in the body with a non-2xx status, so the body must be
+        // read even when the status is unsuccessful.
+        let status = response.status();
+        let body =
+            read_bounded_allowing_error_status(response, self.json_api_max_body_bytes, cancel)
+                .await?;
+        Ok(FetchedBody { status, ..body })
+    }
+
     pub fn new() -> Result<Self, NetworkError> {
         Self::with_config(NetworkServiceConfig::default())
     }
@@ -438,7 +500,31 @@ impl NetworkService {
         url: &str,
         cancel: &CancellationToken,
     ) -> Result<FetchedBody, NetworkError> {
-        fetch_bounded(&self.json_api, url, self.json_api_max_body_bytes, cancel).await
+        self.fetch_json_with_headers(url, &[], cancel).await
+    }
+
+    /// JSON fetch carrying extra request headers.
+    ///
+    /// Separate from [`Self::fetch_json`] because header values can themselves be
+    /// credentials (StellarTunerLog's `X-API-Key`), and they must never reach a log or an
+    /// error message. Nothing here formats the header map.
+    pub async fn fetch_json_with_headers(
+        &self,
+        url: &str,
+        headers: &[(&str, &str)],
+        cancel: &CancellationToken,
+    ) -> Result<FetchedBody, NetworkError> {
+        let parsed = parse_allowed_url(url)?;
+        let mut request = self.json_api.get(parsed);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        let response = tokio::select! {
+            biased;
+            () = cancel.cancelled() => return Err(NetworkError::Cancelled),
+            result = request.send() => result.map_err(transport_error)?,
+        };
+        read_bounded(response, self.json_api_max_body_bytes, cancel).await
     }
 
     /// Artwork profile: finite deadline, byte limit. Content *validation*
@@ -519,7 +605,10 @@ impl NetworkService {
         };
         let status = response.status();
         if !status.is_success() {
-            return Err(NetworkError::Status(status));
+            return Err(NetworkError::Status {
+                status,
+                detail: error_detail(response).await,
+            });
         }
         Ok(ContinuousTsStream {
             response,
@@ -575,16 +664,76 @@ async fn fetch_bounded(
 ) -> Result<FetchedBody, NetworkError> {
     let parsed = parse_allowed_url(url)?;
     let request = client.get(parsed);
-    let mut response = tokio::select! {
+    let response = tokio::select! {
         biased;
         () = cancel.cancelled() => return Err(NetworkError::Cancelled),
         result = request.send() => result.map_err(transport_error)?,
     };
+    read_bounded(response, max_bytes, cancel).await
+}
 
+/// Reads a response body with a hard byte ceiling, cancellable throughout.
+async fn read_bounded(
+    response: reqwest::Response,
+    max_bytes: usize,
+    cancel: &CancellationToken,
+) -> Result<FetchedBody, NetworkError> {
     let status = response.status();
     if !status.is_success() {
-        return Err(NetworkError::Status(status));
+        return Err(NetworkError::Status {
+            status,
+            detail: error_detail(response).await,
+        });
     }
+    read_bounded_allowing_error_status(response, max_bytes, cancel).await
+}
+
+/// Extracts a short, human-readable reason from an error response body.
+///
+/// Deliberately bounded and best-effort: this runs on a failure path, so it must not block
+/// for long or allocate much. JSON `error`/`message` fields are unwrapped because that is
+/// how the proxies in front of these streams report their reason; anything else falls back
+/// to a trimmed prefix of the body. Always redacted, since a body can echo the request URL.
+async fn error_detail(response: reqwest::Response) -> Option<String> {
+    const MAX_DETAIL_BYTES: usize = 512;
+
+    let bytes = tokio::time::timeout(Duration::from_secs(2), response.bytes())
+        .await
+        .ok()?
+        .ok()?;
+    let text = String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_DETAIL_BYTES)]);
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+
+    let message = serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|value| {
+            ["error", "message", "detail"]
+                .iter()
+                .find_map(|key| value.get(*key)?.as_str().map(str::to_string))
+        })
+        .unwrap_or_else(|| text.chars().take(200).collect());
+
+    let message = redact_text(message.trim());
+    if message.is_empty() {
+        None
+    } else {
+        Some(message)
+    }
+}
+
+/// As [`read_bounded`], but returns the body even for an unsuccessful status.
+///
+/// Some APIs put their real error detail in the body of a non-2xx response; discarding it
+/// would turn an actionable message into a bare status code.
+async fn read_bounded_allowing_error_status(
+    mut response: reqwest::Response,
+    max_bytes: usize,
+    cancel: &CancellationToken,
+) -> Result<FetchedBody, NetworkError> {
+    let status = response.status();
     if response
         .content_length()
         .is_some_and(|length| length > max_bytes as u64)
