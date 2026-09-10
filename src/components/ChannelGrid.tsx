@@ -8,6 +8,7 @@ import { ChannelListRow } from './ChannelListRow';
 import { JumpRail } from './JumpRail';
 import { buildNumericJumpGroups } from '../lib/channelJumpGroups';
 import { channelMatchesSearch } from '../lib/channelSearch';
+import { channelDisplayName, channelDisplayNumber } from '../lib/channelDisplay';
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel, StellarStation } from '../types/stellarTunerLog';
 import type { SortMode, ViewMode } from '../stores/libraryStore';
@@ -86,15 +87,15 @@ export function ChannelGrid({
     const list = [...filtered];
     if (sortMode === 'az') {
       list.sort((a, b) =>
-        (channelMetadata.get(a.stream_id)?.marketing_name || a.name).localeCompare(
-          channelMetadata.get(b.stream_id)?.marketing_name || b.name,
+        channelDisplayName(a, channelMetadata.get(a.stream_id)).localeCompare(
+          channelDisplayName(b, channelMetadata.get(b.stream_id)),
         ),
       );
     } else {
       list.sort(
         (a, b) =>
-          (channelMetadata.get(a.stream_id)?.channel_number ?? a.num) -
-          (channelMetadata.get(b.stream_id)?.channel_number ?? b.num),
+          channelDisplayNumber(a, channelMetadata.get(a.stream_id)) -
+          channelDisplayNumber(b, channelMetadata.get(b.stream_id)),
       );
     }
     return list;
@@ -110,7 +111,7 @@ export function ChannelGrid({
 
     if (sortMode === 'channel_number') {
       return buildNumericJumpGroups(
-        sorted.map((channel) => channelMetadata.get(channel.stream_id)?.channel_number ?? channel.num),
+        sorted.map((channel) => channelDisplayNumber(channel, channelMetadata.get(channel.stream_id))),
         maxNumericJumpGroups,
       );
     }
@@ -118,7 +119,7 @@ export function ChannelGrid({
     const seen = new Set<string>();
     const result: { label: string; index: number }[] = [];
     sorted.forEach((channel, index) => {
-      const label = (channelMetadata.get(channel.stream_id)?.marketing_name || channel.name).charAt(0).toUpperCase();
+      const label = channelDisplayName(channel, channelMetadata.get(channel.stream_id)).charAt(0).toUpperCase();
       if (!seen.has(label)) {
         seen.add(label);
         result.push({ label, index });

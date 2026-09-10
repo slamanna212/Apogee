@@ -6,9 +6,12 @@ import {
   buildChannelMetadataMap,
   buildNowPlayingMap,
   findBestStationMatch,
+  listUnmatchedChannels,
   nameSimilarity,
   normalizeChannelName,
   nowPlayingMapsEqual,
+  parseChannelName,
+  significantTokens,
 } from './channelMatcher';
 
 function channel(streamId: number, name: string): XtreamChannel {
@@ -240,5 +243,207 @@ describe('buildChannelMetadataMap', () => {
     const cache = new Map<number, string>();
     buildChannelMetadataMap([channel(1, 'Octane')], [stellarChannel({ id: 'a', marketing_name: 'Octane' })], cache);
     expect(cache.get(1)).toBe('a');
+  });
+});
+
+describe('parseChannelName', () => {
+  it('splits off a leading channel-number prefix', () => {
+    expect(parseChannelName('43 Rock The Bells Radio')).toEqual({ number: 43, name: 'Rock The Bells Radio' });
+    expect(parseChannelName('45 Shade 45')).toEqual({ number: 45, name: 'Shade 45' });
+    expect(parseChannelName('56-The Highway')).toEqual({ number: 56, name: 'The Highway' });
+    expect(parseChannelName('#52 BPM')).toEqual({ number: 52, name: 'BPM' });
+    expect(parseChannelName('Ch. 37 Octane')).toEqual({ number: 37, name: 'Octane' });
+  });
+
+  it('drops a leading provider/locale tag', () => {
+    expect(parseChannelName('US | 52 BPM')).toEqual({ number: 52, name: 'BPM' });
+    expect(parseChannelName('SXM: Octane')).toEqual({ number: null, name: 'Octane' });
+  });
+
+  it('reads a trailing channel number too', () => {
+    expect(parseChannelName('Octane - 37')).toEqual({ number: 37, name: 'Octane' });
+    expect(parseChannelName('Octane (37)')).toEqual({ number: 37, name: 'Octane' });
+  });
+
+  it('leaves names whose digits are part of the name alone', () => {
+    // The digits must be a whole token followed by a separator - in all of
+    // these a letter follows them directly, so nothing is stripped.
+    expect(parseChannelName('70s on 7')).toEqual({ number: null, name: '70s on 7' });
+    expect(parseChannelName('40s Junction')).toEqual({ number: null, name: '40s Junction' });
+    expect(parseChannelName('Pop2K')).toEqual({ number: null, name: 'Pop2K' });
+    expect(parseChannelName('Flex2K')).toEqual({ number: null, name: 'Flex2K' });
+  });
+
+  it('never strips everything away', () => {
+    expect(parseChannelName('3293')).toEqual({ number: null, name: '3293' });
+    expect(parseChannelName('52 -')).toEqual({ number: null, name: '52 -' });
+  });
+});
+
+describe('normalizeChannelName (provider noise)', () => {
+  it('strips stacked quality and locale suffixes', () => {
+    expect(normalizeChannelName('The Highway HD')).toBe('highway');
+    expect(normalizeChannelName('The Highway (FHD)')).toBe('highway');
+    expect(normalizeChannelName('Octane 1080p')).toBe('octane');
+    expect(normalizeChannelName('Octane Radio HD [US]')).toBe('octane');
+  });
+
+  it('strips a leading provider tag only when a separator marks it as one', () => {
+    expect(normalizeChannelName('US | Octane')).toBe('octane');
+    expect(normalizeChannelName('SiriusXM Chill')).toBe('siriusxmchill');
+  });
+
+  it('treats & and "and" alike, and folds diacritics', () => {
+    expect(normalizeChannelName('Heart & Soul')).toBe(normalizeChannelName('Heart and Soul'));
+    expect(normalizeChannelName('Björk Radio')).toBe('bjork');
+  });
+
+  it('never strips a name down to nothing', () => {
+    expect(normalizeChannelName('Radio')).toBe('radio');
+  });
+});
+
+describe('significantTokens', () => {
+  it('drops stopwords and is order-insensitive', () => {
+    expect(significantTokens('The Groove')).toEqual(new Set(['groove']));
+    expect(significantTokens('Radio Margaritaville')).toEqual(significantTokens('Margaritaville Radio'));
+    expect(significantTokens('Heart & Soul')).toEqual(significantTokens('Heart and Soul'));
+  });
+});
+
+describe('findBestStationMatch against provider-numbered channel names', () => {
+  // A provider that prefixes every name with the SiriusXM channel number.
+  // Under a single 0.85 edit-distance threshold these matched or failed purely
+  // on how long the rest of the name was ("61 Willie's Roadhouse" scored 0.889
+  // and matched; "52 BPM" scored 0.600 and did not), so this table is the
+  // regression guard for the whole ladder.
+  const lineup: [number, string][] = [
+    [43, 'Rock The Bells Radio'],
+    [44, 'Hip-Hop Nation'],
+    [45, 'Shade 45'],
+    [46, 'The Heat'],
+    [47, 'Heart & Soul'],
+    [48, 'The Flow'],
+    [49, 'Flex2K'],
+    [50, 'SiriusXM FLY'],
+    [51, 'The Groove'],
+    [52, 'BPM'],
+    [53, "Diplo's Revolution"],
+    [54, 'Studio 54 Radio'],
+    [55, 'SiriusXM Chill'],
+    [56, 'The Highway'],
+    [57, 'Y2Kountry'],
+    [58, 'Prime Country'],
+    [59, 'No Shoes Radio'],
+    [60, "Carrie's Country"],
+    [61, "Willie's Roadhouse"],
+    [62, 'Outlaw Country'],
+  ];
+  const stations = lineup.map(([channelNumber, name]) =>
+    station({ id: `s${channelNumber}`, name, channel_number: channelNumber }),
+  );
+
+  it.each(lineup)('matches "%s %s" to the right station', (channelNumber, name) => {
+    expect(findBestStationMatch(`${channelNumber} ${name}`, stations)?.id).toBe(`s${channelNumber}`);
+  });
+
+  it('also matches those names carrying quality/locale noise', () => {
+    expect(findBestStationMatch('US | 52 BPM HD', stations)?.id).toBe('s52');
+    expect(findBestStationMatch('56 The Highway (FHD)', stations)?.id).toBe('s56');
+    expect(findBestStationMatch('47 Heart and Soul', stations)?.id).toBe('s47');
+  });
+
+  it('still tells neighbouring stations apart', () => {
+    expect(findBestStationMatch('58 Prime Country', stations)?.id).toBe('s58');
+    expect(findBestStationMatch('62 Outlaw Country', stations)?.id).toBe('s62');
+    expect(findBestStationMatch('60 Carrie’s Country', stations)?.id).toBe('s60');
+    expect(findBestStationMatch('99 Nowhere FM', stations)).toBeNull();
+  });
+
+  it('lets the name win over a prefix that is not a channel number', () => {
+    // Some providers prefix a group/EPG number instead - the name still decides.
+    expect(findBestStationMatch('22 - Shade 45', stations)?.id).toBe('s45');
+  });
+
+  it('rejects a channel-number hit that the name does not corroborate', () => {
+    const numbered = [station({ id: 'unrelated', name: 'Liquid Metal', channel_number: 40 })];
+    expect(findBestStationMatch('40 Watercolors', numbered)).toBeNull();
+  });
+
+  it('accepts a channel-number hit the name loosely corroborates', () => {
+    const numbered = [
+      station({ id: 'octane', name: 'Octane', channel_number: 37 }),
+      station({ id: 'liquid', name: 'Liquid Metal', channel_number: 40 }),
+    ];
+    // Too mangled for the 0.85 fuzzy threshold, but the number agrees and the
+    // name is still recognisably the same station.
+    expect(findBestStationMatch('37 Octane Rock', numbered)?.id).toBe('octane');
+  });
+});
+
+describe('findBestStationMatch word-order and stopword differences', () => {
+  it('matches the same words in a different order', () => {
+    const stations = [station({ id: 'marg', name: 'Radio Margaritaville' })];
+    expect(findBestStationMatch('Margaritaville Radio', stations)?.id).toBe('marg');
+  });
+
+  it('does not match two stations that merely share a word', () => {
+    const stations = [station({ id: 'prime', name: 'Prime Country' })];
+    expect(findBestStationMatch('Outlaw Country', stations)).toBeNull();
+  });
+});
+
+describe('buildChannelMetadataMap name sources', () => {
+  it('matches a provider-numbered name to the Stellar channel', () => {
+    const map = buildChannelMetadataMap(
+      [channel(1, '43 Rock The Bells Radio')],
+      [stellarChannel({ id: 'rtb', name: 'Rock The Bells Radio', marketing_name: 'Rock The Bells Radio', channel_number: 43 })],
+    );
+    expect(map.get(1)?.id).toBe('rtb');
+  });
+
+  it('falls back to the streaming name when the marketing name differs', () => {
+    const map = buildChannelMetadataMap(
+      [channel(1, '52 BPM')],
+      [stellarChannel({ id: 'bpm', name: 'siriusxm-bpm', marketing_name: 'Beats Per Minute', streaming_name: 'BPM', channel_number: 52 })],
+    );
+    expect(map.get(1)?.id).toBe('bpm');
+  });
+});
+
+describe('listUnmatchedChannels', () => {
+  it('reports only unmatched channels, with the parsed name and number', () => {
+    const metadata = new Map([[1, stellarChannel()]]);
+    const unmatched = listUnmatchedChannels(
+      [channel(1, '37 Octane'), channel(2, '52 BPM')],
+      metadata,
+    );
+    expect(unmatched).toEqual([
+      { streamId: 2, num: 2, rawName: '52 BPM', parsedNumber: 52, parsedName: 'BPM' },
+    ]);
+  });
+});
+
+describe('findBestStationMatch with decade-style and duplicated names', () => {
+  const stations = [
+    station({ id: 's5', name: '50s on 5', channel_number: 5 }),
+    station({ id: 's7', name: '70s on 7', channel_number: 7 }),
+    station({ id: 's8', name: '80s on 8', channel_number: 8 }),
+    station({ id: 's10', name: 'Pop2K', channel_number: 10 }),
+    station({ id: 's34', name: 'BPM', channel_number: 34 }),
+    station({ id: 's52', name: 'BPM', channel_number: 52 }),
+    station({ id: 's71', name: '40s Junction', channel_number: 71 }),
+  ];
+
+  it('keeps digits that belong to the name, prefix or not', () => {
+    expect(findBestStationMatch('7 70s on 7 HD', stations)?.id).toBe('s7');
+    expect(findBestStationMatch('8 80s on 8', stations)?.id).toBe('s8');
+    expect(findBestStationMatch('10 Pop2K', stations)?.id).toBe('s10');
+    expect(findBestStationMatch('71 40s Junction', stations)?.id).toBe('s71');
+  });
+
+  it('uses the channel number to break a tie between identically named stations', () => {
+    expect(findBestStationMatch('34 BPM', stations)?.id).toBe('s34');
+    expect(findBestStationMatch('52 BPM', stations)?.id).toBe('s52');
   });
 });
