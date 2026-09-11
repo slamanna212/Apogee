@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Text } from '@mantine/core';
 import { IconLayoutGrid, IconLayoutList, IconSearch, IconX } from '@tabler/icons-react';
@@ -9,6 +9,7 @@ import { JumpRail } from './JumpRail';
 import { buildNumericJumpGroups } from '../lib/channelJumpGroups';
 import { channelMatchesSearch } from '../lib/channelSearch';
 import { channelDisplayName, channelDisplayNumber } from '../lib/channelDisplay';
+import { remeasureVirtualRows } from '../lib/remeasureVirtualRows';
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel, StellarStation } from '../types/stellarTunerLog';
 import type { SortMode, ViewMode } from '../stores/libraryStore';
@@ -135,7 +136,11 @@ export function ChannelGrid({
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    setContainerSize({ width: el.clientWidth, height: el.clientHeight });
+    const style = getComputedStyle(el);
+    setContainerSize({
+      width: el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+      height: el.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
+    });
     const ro = new ResizeObserver((entries) => {
       const size = entries[0]?.contentRect;
       if (size) setContainerSize({ width: size.width, height: size.height });
@@ -144,8 +149,7 @@ export function ChannelGrid({
     return () => ro.disconnect();
   }, [sorted.length]);
 
-  // clientWidth already excludes the container's own left/right padding, so the
-  // grid columns follow the same auto-fill math the CSS grid would use.
+  // Use the content width (excluding padding) for the grid's auto-fill math.
   const columns = Math.max(
     1,
     Math.floor((containerSize.width + CHANNEL_CARD_GAP) / (CHANNEL_CARD_MIN_WIDTH + CHANNEL_CARD_GAP)),
@@ -160,7 +164,7 @@ export function ChannelGrid({
       ? Math.round((containerSize.width - CHANNEL_CARD_GAP * (columns - 1)) / columns) + 62
       : 122;
 
-  const rowVirtualizer = useVirtualizer({
+  const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: rowCount,
     getScrollElement: () => containerRef.current,
     estimateSize: () => estimatedRowHeight,
@@ -168,11 +172,35 @@ export function ChannelGrid({
     gap: viewMode === 'grid' ? CHANNEL_CARD_GAP : 10,
   });
 
-  // Re-measure when the layout basis changes (mode switch, column count, filter).
+  const refreshRowMeasurements = useCallback(() => {
+    const container = containerRef.current;
+    if (document.visibilityState === 'hidden' || !container?.clientWidth || !container.clientHeight) return;
+    remeasureVirtualRows(rowVirtualizer);
+  }, [rowVirtualizer]);
+
+  // measure() only clears the cache. Mounted rows may not emit another resize,
+  // so read them again before paint instead of leaving their estimated heights.
+  useLayoutEffect(() => {
+    refreshRowMeasurements();
+  }, [refreshRowMeasurements, viewMode, columns, containerSize.width, containerSize.height, sorted.length]);
+
   useEffect(() => {
-    rowVirtualizer.measure();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, columns, sorted.length]);
+    let frame: number | undefined;
+    const scheduleRefresh = () => {
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = undefined;
+        refreshRowMeasurements();
+      });
+    };
+    window.addEventListener('focus', scheduleRefresh);
+    document.addEventListener('visibilitychange', scheduleRefresh);
+    return () => {
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      window.removeEventListener('focus', scheduleRefresh);
+      document.removeEventListener('visibilitychange', scheduleRefresh);
+    };
+  }, [refreshRowMeasurements]);
 
   const scrollToItemIndex = useCallback(
     (itemIndex: number) => {
