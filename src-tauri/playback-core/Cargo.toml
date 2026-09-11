@@ -8,7 +8,7 @@ publish = false
 [dependencies]
 broadcast-common = { version = "=9.3.0", default-features = false }
 hls-runtime = { version = "=0.6.0", default-features = false }
-transmux = { version = "=0.24.0", default-features = false }
+transmux = { version = "=0.24.1", default-features = false }
 container-probe = { version = "=0.1.0", default-features = false }
 symphonia = { version = "=0.6.0", default-features = false, features = ["aac", "mp3"] }
 serde = { version = "=1.0.229", features = ["derive"] }

@@ -2017,7 +2017,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -5043,7 +5043,7 @@ dependencies = [
  "serde_with",
  "swift-rs",
  "thiserror 2.0.20",
- "toml 0.9.12+spec-1.1.0",
+ "toml 1.1.3+spec-1.1.0",
  "url",
  "urlpattern",
  "uuid 1.26.0",
@@ -5090,7 +5090,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -5450,9 +5450,9 @@ dependencies = [
 
 [[package]]
 name = "transmux"
-version = "0.24.0"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00b27e2bf2eaf7e12e70b2b50aaad1b96ba7274ce40618ca117803dffed72465"
+checksum = "b69a01ac3a5e8c20a9b79215a6201f9fee6e44c1908541e5a838f5d5721ab5d6"
 dependencies = [
  "broadcast-common",
  "broadcast-hls",
