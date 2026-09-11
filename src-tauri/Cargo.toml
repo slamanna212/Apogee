@@ -29,27 +29,27 @@ dotenvy = "=0.15.7"
 [dependencies]
 serde_json = "=1.0.151"
 serde = { version = "=1.0.229", features = ["derive"] }
-log = "=0.4.33"
+log = "=0.4.34"
 tauri = { version = "=2.11.5", features = ["macos-private-api"] }
-tauri-plugin-log = "=2.9.0"
-tauri-plugin-dialog = "=2.7.2"
+tauri-plugin-log = "=2.9.1"
+tauri-plugin-dialog = "=2.7.3"
 tauri-plugin-store = "=2.4.4"
-tauri-plugin-updater = "=2.10.1"
+tauri-plugin-updater = "=2.11.0"
 tauri-plugin-process = "=2.3.1"
-tauri-plugin-opener = "=2.5.4"
-tokio = { version = "=1.53.0", features = ["process", "net", "io-util", "rt", "time", "macros", "sync", "fs"] }
+tauri-plugin-opener = "=2.5.5"
+tokio = { version = "=1.53.1", features = ["process", "net", "io-util", "rt", "time", "macros", "sync", "fs"] }
 souvlaki = "=0.8.3"
 discord-rich-presence = "=1.1.0"
 url = "=2.5.8"
-time = { version = "=0.3.54", features = ["parsing", "formatting"] }
+time = { version = "=0.3.55", features = ["parsing", "formatting"] }
 reqwest = { version = "=0.12.28", default-features = false, features = ["json", "rustls-tls", "stream"] }
 md5 = "=0.8.1"
 apogee-playback-core = { path = "playback-core" }
 # Promoted from Windows-only to every desktop target (plan section 5). Links ALSA
 # dynamically on Linux, so end users need only the runtime library, not the headers.
-cpal = "=0.18.1"
+cpal = "=0.18.2"
 hls-runtime = { version = "=0.6.0", default-features = false }
-tokio-util = { version = "=0.7.18", default-features = false }
+tokio-util = { version = "=0.7.19", default-features = false }
 bytes = "=1.12.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
