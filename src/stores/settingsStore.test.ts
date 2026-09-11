@@ -22,15 +22,67 @@ vi.mock('../lib/secrets', () => ({
 
 vi.mock('../lib/playerClient', () => ({
   migrateDevice: vi.fn(async () => ({ deviceId: null, notice: null })),
+  setDevice: vi.fn(async () => {}),
 }));
 
-import { migrateDevice } from '../lib/playerClient';
-import { useSettingsStore } from './settingsStore';
+import { migrateDevice, setDevice } from '../lib/playerClient';
+import { DEFAULT_SETTINGS, useSettingsStore } from './settingsStore';
 
 beforeEach(() => {
   mockStore.data = {};
   vi.clearAllMocks();
-  useSettingsStore.setState({ loaded: false });
+  useSettingsStore.setState({ loaded: false, settings: DEFAULT_SETTINGS });
+});
+
+describe('live audio output settings', () => {
+  it('switches output before a pending settings save finishes', async () => {
+    let finishSave!: () => void;
+    mockStore.save.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishSave = resolve;
+    }));
+    const selection = { id: 'usb-headset', name: 'USB Headset' };
+    const update = useSettingsStore.getState().update({ audioDevice: selection });
+
+    expect(setDevice).toHaveBeenCalledExactlyOnceWith('usb-headset');
+    await vi.waitFor(() => expect(finishSave).toBeDefined());
+    finishSave();
+    await update;
+    expect(mockStore.data.settings).toMatchObject({ audioDevice: selection });
+  });
+
+  it('switches back to the system default immediately', async () => {
+    useSettingsStore.setState({
+      settings: { ...DEFAULT_SETTINGS, audioDevice: { id: 'usb-headset', name: 'USB Headset' } },
+    });
+    await useSettingsStore.getState().update({ audioDevice: null });
+    expect(setDevice).toHaveBeenCalledExactlyOnceWith(null);
+  });
+
+  it('does not restart playback for unrelated settings or the same device id', async () => {
+    useSettingsStore.setState({
+      settings: { ...DEFAULT_SETTINGS, audioDevice: { id: 'usb-headset', name: 'USB Headset' } },
+    });
+    await useSettingsStore.getState().update({ volume: 50 });
+    await useSettingsStore.getState().update({
+      audioDevice: { id: 'usb-headset', name: 'Renamed headset' },
+    });
+    expect(setDevice).not.toHaveBeenCalled();
+  });
+
+  it('applies the output even when saving fails, and reports the save error', async () => {
+    mockStore.save.mockRejectedValueOnce(new Error('Disk full'));
+    await expect(useSettingsStore.getState().update({
+      audioDevice: { id: 'usb-headset', name: 'USB Headset' },
+    })).rejects.toThrow('Disk full');
+    expect(setDevice).toHaveBeenCalledExactlyOnceWith('usb-headset');
+  });
+
+  it('reports a failed output switch to the caller', async () => {
+    vi.mocked(setDevice).mockRejectedValueOnce(new Error('Device unavailable'));
+    await expect(useSettingsStore.getState().update({
+      audioDevice: { id: 'usb-headset', name: 'USB Headset' },
+    })).rejects.toThrow('Device unavailable');
+  });
 });
 
 describe('settingsStore migration of categoryId/categoryName', () => {

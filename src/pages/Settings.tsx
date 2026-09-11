@@ -5,7 +5,7 @@ import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
 import { useSettingsStore, type UpdateChannel } from '../stores/settingsStore';
-import { listDevices, setDevice as playerSetDevice, setEqualizer as playerSetEqualizer, type DeviceDescriptor } from '../lib/playerClient';
+import { listDevices, setEqualizer as playerSetEqualizer, type DeviceDescriptor } from '../lib/playerClient';
 import {
   detectEqualizerPreset,
   EQUALIZER_BANDS,
@@ -212,19 +212,13 @@ export function Settings() {
 
   async function handleAudioDeviceChange(value: string | null) {
     setAudioDeviceError(null);
-    if (!value) {
-      await updateSettings({ audioDevice: null });
-      playerSetDevice(null).catch((err) => {
-        setAudioDeviceError(err instanceof Error ? err.message : String(err));
-      });
-      return;
-    }
     const device = audioDevices.find((d) => d.id === value);
-    const selection = { id: value, name: device?.name ?? value };
-    await updateSettings({ audioDevice: selection });
-    playerSetDevice(selection.id).catch((err) => {
+    const selection = value ? { id: value, name: device?.name ?? value } : null;
+    try {
+      await updateSettings({ audioDevice: selection });
+    } catch (err) {
       setAudioDeviceError(err instanceof Error ? err.message : String(err));
-    });
+    }
   }
 
   useEffect(() => {

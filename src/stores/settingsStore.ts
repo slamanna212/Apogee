@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { load, type Store } from '@tauri-apps/plugin-store';
 import { getSecret, setSecret, getBuiltinStellarApiKey, SECRET_KEYS } from '../lib/secrets';
 import { DEFAULT_EQUALIZER, normalizeEqualizerSettings, type EqualizerSettings } from '../lib/equalizer';
-import { migrateDevice } from '../lib/playerClient';
+import { migrateDevice, setDevice } from '../lib/playerClient';
 
 export type UpdateChannel = 'stable' | 'beta';
 
@@ -191,17 +191,30 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     });
   },
   async update(patch) {
-    const next = { ...get().settings, ...patch };
+    const previous = get().settings;
+    const next = { ...previous, ...patch };
     set({ settings: next });
 
-    const { password, ...persisted } = next;
-    const store = await getStore();
-    await store.set('settings', persisted);
-    await store.save();
+    // Apply the output preference immediately, independently of disk persistence.
+    // Keeping this here also covers callers other than the Settings picker.
+    const deviceUpdate = patch.audioDevice !== undefined
+      && (previous.audioDevice?.id ?? null) !== (next.audioDevice?.id ?? null)
+      ? setDevice(next.audioDevice?.id ?? null)
+      : Promise.resolve();
 
-    if (patch.password !== undefined) {
-      await setSecret(SECRET_KEYS.xtreamPassword, password);
-    }
+    await Promise.all([
+      deviceUpdate,
+      (async () => {
+        const { password, ...persisted } = next;
+        const store = await getStore();
+        await store.set('settings', persisted);
+        await store.save();
+
+        if (patch.password !== undefined) {
+          await setSecret(SECRET_KEYS.xtreamPassword, password);
+        }
+      })(),
+    ]);
   },
   dismissDeviceMigrationNotice() {
     set({ deviceMigrationNotice: null });
