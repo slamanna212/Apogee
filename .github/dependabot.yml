@@ -1,7 +1,14 @@
 version: 2
+
+# All update PRs target `dev`, not `main`. `dev` is the active development
+# branch; `main` only moves when a release is cut. Note this file is read from
+# the repository's DEFAULT branch (main), so it must be updated there to take
+# effect. Consequence of `target-branch`: security-update PRs still target the
+# default branch, and per-ecosystem options here no longer apply to them.
 updates:
   - package-ecosystem: "npm"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -36,6 +43,7 @@ updates:
 
   - package-ecosystem: "cargo"
     directory: "/src-tauri"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -55,6 +63,7 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "monday"
