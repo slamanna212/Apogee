@@ -119,6 +119,9 @@ export function Waveform({ active, bands = 8, size = 'md' }: WaveformProps) {
   const barWidth = size === 'sm' ? 2.5 : 3;
   const gap = size === 'sm' ? 2 : 3;
   const height = size === 'sm' ? 18 : 28;
+  // Leave room around the transformed bars so edge pixels do not sit on the
+  // visualizer's raster boundary in WebView2, including at fractional DPI.
+  const edgeInset = 2;
 
   return (
     <div
@@ -127,7 +130,9 @@ export function Waveform({ active, bands = 8, size = 'md' }: WaveformProps) {
         alignItems: 'center',
         gap,
         height,
-        width: barWidth * bands + gap * (bands - 1),
+        width: barWidth * bands + gap * (bands - 1) + edgeInset * 2,
+        paddingInline: edgeInset,
+        boxSizing: 'border-box',
         flex: 'none',
       }}
     >
@@ -139,6 +144,7 @@ export function Waveform({ active, bands = 8, size = 'md' }: WaveformProps) {
           }}
           style={{
             width: barWidth,
+            flex: 'none',
             height: '100%',
             borderRadius: barWidth,
             background: 'var(--app-accent2)',
