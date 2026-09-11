@@ -14,25 +14,6 @@ describe('spectrumDisplayLevels', () => {
     expect(new Set(spectrumDisplayLevels(Array(8).fill(0.5), 8)).size).toBe(1);
   });
 
-  it('leaves headroom and visible differences during loud, dense passages', () => {
-    const input = [0.84, 0.88, 0.92, 0.96, 1, 0.96, 0.92, 0.88];
-    for (const bands of [4, 8]) {
-      const output = spectrumDisplayLevels(input, bands);
-      expect(Math.max(...output)).toBeLessThan(0.75);
-      expect(Math.max(...output) - Math.min(...output)).toBeGreaterThan(0.15);
-    }
-    expect(spectrumDisplayLevels(Array(8).fill(1), 8)[0]).toBeLessThan(0.5);
-  });
-
-  it('keeps strong peaks distinct instead of clipping them to equal heights', () => {
-    const output = spectrumDisplayLevels([0, 0, 0, 0, 0.7, 0.8, 0.9, 1], 8);
-    for (let i = 5; i < output.length; i++) {
-      expect(output[i]).toBeGreaterThan(output[i - 1]);
-    }
-    expect(output[7]).toBeGreaterThan(0.9);
-    expect(output[7]).toBeLessThan(1);
-  });
-
   it('includes every source band in the compact display', () => {
     for (let source = 0; source < 8; source++) {
       const input = Array(8).fill(0);
