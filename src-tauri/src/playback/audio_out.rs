@@ -274,7 +274,7 @@ where
     };
     let sample_rate = config.sample_rate;
     let mut scratch = vec![0.0f32; max_frames.max(1) * channels];
-    let mut equalizer = Equalizer::new(config.sample_rate, channels);
+    let mut equalizer = initial_equalizer(config.sample_rate, channels, &mut pipeline.controls);
     let callback_stats = Arc::clone(stats);
 
     device
@@ -338,12 +338,54 @@ where
         .map_err(|e| format!("could not build output stream: {e}"))
 }
 
+/// The initial settings are queued before the stream is opened. Apply them without a
+/// ramp so saved zero volume or mute never leaks the first 20 ms at the default gain.
+/// Later user changes still ramp in the running callback.
+fn initial_equalizer(
+    sample_rate: u32,
+    channels: usize,
+    controls: &mut ControlConsumer<ControlUpdate>,
+) -> Equalizer {
+    let mut equalizer = Equalizer::new(sample_rate, channels);
+    while let Some(update) = controls.try_recv() {
+        equalizer.apply_coefficients(&update.eq);
+        equalizer.set_gain(update.volume, update.muted, 0);
+    }
+    equalizer
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use apogee_playback_core::dsp::EqCoefficients;
     use apogee_playback_core::output::{control_channel, pcm_ring, BufferStateFlag};
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn initial_volume_and_mute_apply_before_the_first_audio_frame() {
+        for (volume, muted, expected) in [(0, false, 0.0), (80, true, 0.0), (50, false, 0.25)] {
+            let (mut tx, mut rx) = control_channel(2);
+            tx.try_send(ControlUpdate {
+                eq: EqCoefficients::build(48_000.0, false, &[0.0; 10]).unwrap(),
+                volume,
+                muted,
+            })
+            .unwrap();
+            let mut equalizer = initial_equalizer(48_000, 2, &mut rx);
+            let mut first_callback = vec![1.0; 2048];
+            equalizer.process(&mut first_callback);
+            assert!(
+                first_callback.iter().all(|sample| *sample == expected),
+                "startup leaked audio at volume={volume}, muted={muted}"
+            );
+            // A subsequent volume change retains the normal click-free ramp.
+            equalizer.set_gain(100, false, 960);
+            let mut next_callback = vec![1.0; 2048];
+            equalizer.process(&mut next_callback);
+            assert!(next_callback[0] > expected && next_callback[0] < 1.0);
+            assert_eq!(*next_callback.last().unwrap(), 1.0);
+        }
+    }
 
     /// Prefers a null/dummy sink so the suite makes no audible noise. Falls back to the
     /// system default only if no such device exists.

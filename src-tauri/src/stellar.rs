@@ -1,9 +1,7 @@
 //! StellarTunerLog API client, as typed Tauri commands.
 //!
-//! The endpoints differ in authentication and that difference is deliberate, not an
-//! oversight: `/nowplaying` and `/channels` are keyless, `/history` requires an API key.
-//! Preserved exactly, so a missing key degrades to "no play history" rather than breaking
-//! now-playing metadata for everyone.
+//! The published API requires X-API-Key on all three endpoints. Some public responses
+//! currently work without a key, but that is not the documented subscriber contract.
 //!
 //! Responses pass through as raw JSON so the existing TypeScript types and their tests keep
 //! working unchanged.
@@ -51,6 +49,10 @@ async fn get_json(
         Some(key) if !key.is_empty() => vec![("X-API-Key", key)],
         _ => Vec::new(),
     };
+    log::debug!(
+        "stellar {endpoint} request: api_key_present={}",
+        !headers.is_empty()
+    );
     let body = network
         .fetch_json_with_headers(url, &headers, &cancel)
         .await
@@ -58,8 +60,21 @@ async fn get_json(
             log::warn!("stellar {endpoint} request failed: {e}");
             describe(endpoint, &e)
         })?;
-    serde_json::from_slice(&body.bytes)
-        .map_err(|_| format!("StellarTunerLog {endpoint} returned invalid JSON"))
+    let value: Value = serde_json::from_slice(&body.bytes)
+        .map_err(|_| format!("StellarTunerLog {endpoint} returned invalid JSON"))?;
+    log::debug!(
+        "stellar {endpoint} response: HTTP {} updated_utc={} station_count={}",
+        body.status.as_u16(),
+        value
+            .get("updated_utc")
+            .and_then(Value::as_str)
+            .unwrap_or("n/a"),
+        value
+            .get("station_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+    );
+    Ok(value)
 }
 
 #[tauri::command]
@@ -67,12 +82,19 @@ pub async fn stellar_now_playing(
     network: State<'_, NetworkService>,
     api_key: Option<String>,
 ) -> Result<Value, String> {
-    get_json(&network, "/nowplaying", NOWPLAYING_URL, api_key.as_deref()).await
+    get_json(
+        &network,
+        "/v1/nowplaying",
+        NOWPLAYING_URL,
+        api_key.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn stellar_channels(network: State<'_, NetworkService>) -> Result<Value, String> {
-    get_json(&network, "/channels", CHANNELS_URL, None).await
+    let api_key = crate::secrets::secrets_get_builtin_stellar_key();
+    get_json(&network, "/v1/channels", CHANNELS_URL, api_key.as_deref()).await
 }
 
 #[tauri::command]
@@ -82,7 +104,7 @@ pub async fn stellar_history(
     api_key: String,
 ) -> Result<Value, String> {
     let url = history_url(&channel_id)?;
-    get_json(&network, "/history", &url, Some(&api_key)).await
+    get_json(&network, "/v1/history", &url, Some(&api_key)).await
 }
 
 /// Builds the history URL, escaping the channel id so it cannot escape its path segment.

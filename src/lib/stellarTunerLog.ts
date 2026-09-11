@@ -9,9 +9,8 @@ import type {
 
 /**
  * StellarTunerLog calls run in Rust (`src-tauri/src/stellar.rs`) so all application HTTP
- * shares one client. The endpoints' differing authentication is preserved deliberately:
- * /nowplaying and /channels are keyless, only /history requires an API key, so a missing
- * key costs you play history rather than now-playing metadata.
+ * shares one client. The published API requires a key for all endpoints; Rust supplies
+ * the bundled key for the channel catalog and uses the supplied key for other calls.
  */
 
 /**
@@ -26,12 +25,12 @@ function downgradeSiriusCdnUrl(url: string): string {
   return url.replace(/^https:\/\/(pri\.art\.prod\.streaming\.siriusxm\.com\/)/, 'http://$1');
 }
 
-/** No API key required for /nowplaying - only /history checks it. */
+/** Supply the bundled API key for the documented subscriber endpoint. */
 export function getNowPlaying(apiKey?: string): Promise<StellarNowPlayingResponse> {
   return invoke('stellar_now_playing', { apiKey: apiKey ?? null });
 }
 
-/** No API key required for /channels either - only /history checks it. */
+/** Rust attaches the bundled API key to the catalog request. */
 export async function getChannels(): Promise<StellarChannel[]> {
   const data: StellarChannelsResponse = await invoke('stellar_channels');
   const channels = Array.isArray(data.channels) ? data.channels : Object.values(data.channels);
