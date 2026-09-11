@@ -23,6 +23,8 @@ const EQUALIZER_PRESET_OPTIONS: { value: Exclude<EqualizerPreset, 'custom'>; lab
   { value: 'vocal', label: 'Vocal' },
   { value: 'rock', label: 'Rock' },
   { value: 'pop', label: 'Pop' },
+  { value: 'edm', label: 'EDM' },
+  { value: 'country', label: 'Country' },
 ];
 
 export const AudioPanel = forwardRef<SettingsResetHandle, SettingsPanelProps>(function AudioPanel({ onSaved }, ref) {
