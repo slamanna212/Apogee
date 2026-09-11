@@ -200,7 +200,11 @@ impl Controller {
     ///
     /// Always allocates a fresh generation, even for the station already playing, so two
     /// rapid selections of the same station cannot be confused for one another.
-    pub fn play(&mut self, station_id: impl Into<String>) -> Generation {
+    ///
+    /// `now_ms` starts the [`CONNECT_BUDGET_MS`] wall-clock accounting immediately, at the
+    /// actual beginning of the connect phase - not lazily at the first failure, which would
+    /// hand a slow-but-eventually-failing first attempt extra, unaccounted-for budget.
+    pub fn play(&mut self, station_id: impl Into<String>, now_ms: u64) -> Generation {
         self.generation = Generation(self.generation.0 + 1);
         self.station_id = Some(station_id.into());
         self.state = PlaybackState::Connecting;
@@ -210,7 +214,7 @@ impl Controller {
         self.sample_rate = None;
         self.error = None;
         self.playing_since_ms = None;
-        self.connect_started_ms = None;
+        self.connect_started_ms = Some(now_ms);
         self.bump();
         self.generation
     }
@@ -327,6 +331,8 @@ impl Controller {
             return Some(Next::GiveUp);
         }
 
+        // Set by `play()` at the actual start of the connect phase; `get_or_insert` here is
+        // only a defensive fallback and should never actually need to insert.
         let started = *self.connect_started_ms.get_or_insert(now_ms);
         let elapsed = now_ms.saturating_sub(started);
         self.attempt += 1;

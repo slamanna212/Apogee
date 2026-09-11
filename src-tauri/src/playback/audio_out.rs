@@ -11,7 +11,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
-use apogee_playback_core::output::{OutputFormat, RingConsumer};
+use apogee_playback_core::dsp::{ControlUpdate, Equalizer};
+use apogee_playback_core::output::{ControlConsumer, GatedConsumer, OutputFormat, RingProducer};
 use cpal::traits::{DeviceTrait, StreamTrait};
 
 use super::device::{resolve, DeviceDescriptor, DeviceError, DeviceRequest};
@@ -50,6 +51,13 @@ enum Command {
     Stop,
 }
 
+struct CallbackPipeline {
+    ring: GatedConsumer,
+    controls: ControlConsumer<ControlUpdate>,
+    analysis: RingProducer,
+    visualizer_enabled: Arc<AtomicBool>,
+}
+
 /// A running output stream. Dropping this stops and joins the owner thread.
 pub struct AudioOutput {
     commands: Sender<Command>,
@@ -59,19 +67,43 @@ pub struct AudioOutput {
     stats: Arc<OutputStats>,
 }
 
+/// A device and its negotiated configuration resolved as one unit. Keeping these together
+/// prevents the system default from being resolved once for the ring format and again for
+/// the stream, which can produce mismatched formats if the default changes between calls.
+pub struct PreparedOutput {
+    device: cpal::Device,
+    descriptor: DeviceDescriptor,
+    config: cpal::StreamConfig,
+    sample_format: cpal::SampleFormat,
+    format: OutputFormat,
+}
+
 /// The format a device wants, without opening a stream.
 ///
 /// Needed before the ring can be sized, and building a throwaway stream just to read this
 /// risks an audible glitch and a needless device grab.
-pub fn preferred_format(request: &DeviceRequest) -> Result<OutputFormat, DeviceError> {
-    let (device, _) = resolve(request)?;
+pub fn prepare(request: &DeviceRequest) -> Result<PreparedOutput, DeviceError> {
+    let (device, descriptor) = resolve(request)?;
     let supported = device
         .default_output_config()
         .map_err(|e| DeviceError::Backend(e.to_string()))?;
-    Ok(OutputFormat::new(
-        supported.sample_rate(),
-        supported.channels(),
-    ))
+    let format = OutputFormat::new(supported.sample_rate(), supported.channels());
+    let sample_format = supported.sample_format();
+    let config = supported.into();
+    Ok(PreparedOutput {
+        device,
+        descriptor,
+        config,
+        sample_format,
+        format,
+    })
+}
+
+impl PreparedOutput {
+    #[must_use]
+    pub fn format(&self) -> OutputFormat {
+        self.format
+    }
 }
 
 impl AudioOutput {
@@ -79,20 +111,32 @@ impl AudioOutput {
     ///
     /// The device's own preferred configuration is used rather than forcing a rate or
     /// format, so returns the format the caller must resample and convert to.
-    pub fn start(request: &DeviceRequest, ring: RingConsumer) -> Result<Self, DeviceError> {
-        let (device, descriptor) = resolve(request)?;
-        let supported = device
-            .default_output_config()
-            .map_err(|e| DeviceError::Backend(e.to_string()))?;
-        let format = OutputFormat::new(supported.sample_rate(), supported.channels());
-        let sample_format = supported.sample_format();
-        let config: cpal::StreamConfig = supported.into();
+    pub fn start(
+        prepared: PreparedOutput,
+        ring: GatedConsumer,
+        controls: ControlConsumer<ControlUpdate>,
+        analysis: RingProducer,
+        visualizer_enabled: Arc<AtomicBool>,
+    ) -> Result<Self, DeviceError> {
+        let PreparedOutput {
+            device,
+            descriptor,
+            config,
+            sample_format,
+            format,
+        } = prepared;
 
         let stats = Arc::new(OutputStats::default());
         let (commands, rx) = channel();
         let (ready_tx, ready_rx) = channel();
 
         let thread_stats = Arc::clone(&stats);
+        let pipeline = CallbackPipeline {
+            ring,
+            controls,
+            analysis,
+            visualizer_enabled,
+        };
         let thread = std::thread::Builder::new()
             .name("apogee-audio-out".to_string())
             .spawn(move || {
@@ -100,7 +144,7 @@ impl AudioOutput {
                     device,
                     config,
                     sample_format,
-                    ring,
+                    pipeline,
                     thread_stats,
                     &ready_tx,
                     &rx,
@@ -160,12 +204,12 @@ fn run_stream(
     device: cpal::Device,
     config: cpal::StreamConfig,
     sample_format: cpal::SampleFormat,
-    ring: RingConsumer,
+    pipeline: CallbackPipeline,
     stats: Arc<OutputStats>,
     ready: &Sender<Result<(), String>>,
     commands: &Receiver<Command>,
 ) {
-    let built = build_stream(&device, &config, sample_format, ring, &stats);
+    let built = build_stream(&device, &config, sample_format, pipeline, &stats);
     let stream = match built {
         Ok(stream) => stream,
         Err(e) => {
@@ -191,7 +235,7 @@ fn build_stream(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     sample_format: cpal::SampleFormat,
-    ring: RingConsumer,
+    pipeline: CallbackPipeline,
     stats: &Arc<OutputStats>,
 ) -> Result<cpal::Stream, String> {
     let error_stats = Arc::clone(stats);
@@ -202,9 +246,9 @@ fn build_stream(
     };
 
     match sample_format {
-        cpal::SampleFormat::F32 => build_typed::<f32>(device, config, ring, stats, on_error),
-        cpal::SampleFormat::I16 => build_typed::<i16>(device, config, ring, stats, on_error),
-        cpal::SampleFormat::U16 => build_typed::<u16>(device, config, ring, stats, on_error),
+        cpal::SampleFormat::F32 => build_typed::<f32>(device, config, pipeline, stats, on_error),
+        cpal::SampleFormat::I16 => build_typed::<i16>(device, config, pipeline, stats, on_error),
+        cpal::SampleFormat::U16 => build_typed::<u16>(device, config, pipeline, stats, on_error),
         other => Err(format!("unsupported output sample format: {other:?}")),
     }
 }
@@ -216,7 +260,7 @@ fn build_stream(
 fn build_typed<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
-    mut ring: RingConsumer,
+    mut pipeline: CallbackPipeline,
     stats: &Arc<OutputStats>,
     on_error: impl FnMut(cpal::Error) + Send + 'static,
 ) -> Result<cpal::Stream, String>
@@ -228,7 +272,9 @@ where
         cpal::BufferSize::Fixed(frames) => frames as usize,
         cpal::BufferSize::Default => 8192,
     };
+    let sample_rate = config.sample_rate;
     let mut scratch = vec![0.0f32; max_frames.max(1) * channels];
+    let mut equalizer = Equalizer::new(config.sample_rate, channels);
     let callback_stats = Arc::clone(stats);
 
     device
@@ -246,8 +292,29 @@ where
                     return;
                 }
                 let buffer = &mut scratch[..wanted];
-                let real_frames = ring.pop_into(buffer);
+                let real_frames = pipeline.ring.pop_into(buffer);
                 let total_frames = wanted / channels;
+
+                // Coefficients were prepared off-callback. Applying an update and processing
+                // this preallocated buffer are both bounded and allocation-free.
+                while let Some(update) = pipeline.controls.try_recv() {
+                    equalizer.apply_coefficients(&update.eq);
+                    equalizer.set_gain(update.volume, update.muted, sample_rate / 50);
+                }
+                // Gated buffering promises exact silence and must not advance EQ/gain
+                // state through synthetic frames. Once real audio is present, processing
+                // the whole callback (including an underrun tail) lets filters decay
+                // naturally at the end of a partially filled playing callback.
+                if real_frames > 0 {
+                    equalizer.process(buffer);
+                }
+
+                // The visualizer sees exactly the post-control samples consumed here. Its
+                // bounded ring drops excess samples rather than ever waiting in the callback.
+                if pipeline.visualizer_enabled.load(Ordering::Relaxed) && real_frames > 0 {
+                    let real_samples = real_frames * channels;
+                    let _ = pipeline.analysis.push_frames(&buffer[..real_samples]);
+                }
 
                 for (dst, src) in out.iter_mut().zip(buffer.iter()) {
                     *dst = T::from_sample(*src);
@@ -274,7 +341,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use apogee_playback_core::output::pcm_ring;
+    use apogee_playback_core::dsp::EqCoefficients;
+    use apogee_playback_core::output::{control_channel, pcm_ring, BufferStateFlag};
     use std::time::{Duration, Instant};
 
     /// Prefers a null/dummy sink so the suite makes no audible noise. Falls back to the
@@ -288,6 +356,34 @@ mod tests {
             .iter()
             .find(|d| d.id.contains("null") || d.name.to_lowercase().contains("discard"));
         null.map(|d| DeviceRequest::Specific(d.id.clone()))
+    }
+
+    fn start_test_output(
+        request: &DeviceRequest,
+        consumer: apogee_playback_core::output::RingConsumer,
+    ) -> AudioOutput {
+        let prepared = prepare(request).expect("device should resolve");
+        let format = prepared.format();
+        let state = Arc::new(BufferStateFlag::default());
+        let gated = GatedConsumer::new(consumer, 1, 0, state);
+        let (mut controls, control_rx) = control_channel(2);
+        controls
+            .try_send(ControlUpdate {
+                eq: EqCoefficients::build(f64::from(format.sample_rate), false, &[0.0; 10])
+                    .unwrap(),
+                volume: 100,
+                muted: false,
+            })
+            .unwrap();
+        let (analysis, _analysis_rx) = pcm_ring(format, 1024);
+        AudioOutput::start(
+            prepared,
+            gated,
+            control_rx,
+            analysis,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .expect("stream should start")
     }
 
     #[test]
@@ -307,7 +403,7 @@ mod tests {
             .collect();
         producer.push_frames(&block);
 
-        let output = AudioOutput::start(&request, consumer).expect("stream should start");
+        let output = start_test_output(&request, consumer);
         assert!(!output.descriptor().id.is_empty());
 
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -334,7 +430,7 @@ mod tests {
         let format = OutputFormat::new(48_000, 2);
         // Never fed: every callback must underrun cleanly.
         let (_producer, consumer) = pcm_ring(format, format.frames_for_millis(500));
-        let output = AudioOutput::start(&request, consumer).expect("stream should start");
+        let output = start_test_output(&request, consumer);
 
         std::thread::sleep(Duration::from_millis(300));
         let (played, underrun, _started, failed) = output.stats().snapshot();
@@ -357,7 +453,7 @@ mod tests {
         };
         let format = OutputFormat::new(48_000, 2);
         let (_producer, consumer) = pcm_ring(format, 4096);
-        let output = AudioOutput::start(&request, consumer).expect("stream should start");
+        let output = start_test_output(&request, consumer);
         // Dropping must not hang: the owner thread parks on recv and exits on Stop.
         let start = Instant::now();
         drop(output);

@@ -9,6 +9,26 @@ See also `docs/symphonia-manual-test-guide.md` for the audio-engine checks, and
 ---
 
 (entries appended below as they happen)
+## 0. Corrective audio and AppImage acceptance (2026-09-11)
+
+The corrective plan is implemented and covered by automated Rust tests, but these checks require
+real hardware or a release-runner artifact:
+
+- While two seconds of PCM are queued, change volume, mute, and EQ; the next callback should ramp to
+  the new setting rather than waiting for the queue to drain.
+- Force a network starvation and recovery. Audio should remain silent while refilling, preserve the
+  queued tail, and return the UI/media-session state to playing only when consumption resumes.
+- Switch outputs while playing, change the system default while following it, then repeat with a
+  specific device selected. Only system-default mode should follow the OS change.
+- Unplug/replug a specifically selected USB/Bluetooth device. Its saved preference must survive;
+  fallback/recovery or a visible failure is acceptable, silence with a loading state is not. A
+  healthy fallback stream intentionally stays on the fallback until the device is selected again;
+  a later session or retry resolves the preserved preference.
+- Run stable and prerelease Linux packaging with a disposable updater key. Extract the final
+  AppImage and confirm `libwayland-client.so.0` is absent, verify the final file against the exact
+  signature stored in `latest.json`, mutate one byte and confirm verification fails, then exercise a
+  controlled update/install/relaunch. No release needs to be published for this test.
+
 ## 1. Channel loading and metadata (highest risk)
 
 The Xtream and StellarTunerLog clients moved from TypeScript into Rust. Their unit tests

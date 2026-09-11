@@ -25,6 +25,9 @@
 //! ring) runs on the non-real-time feeder/decoder thread and is free to reuse buffers across
 //! calls, but is not required to be allocation-free the way the consumer side is.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
+
 use rtrb::{Consumer, Producer, RingBuffer};
 use rubato::audioadapter_buffers::owned::InterleavedOwned;
 use rubato::{Async, FixedAsync, PolynomialDegree, Resampler as _};
@@ -434,6 +437,79 @@ impl ActiveResampler {
 }
 
 // ---------------------------------------------------------------------------------------
+// Format-aware conversion (finding 10: channel changes must not be missed when the rate
+// is unchanged, and vice versa)
+// ---------------------------------------------------------------------------------------
+
+/// Combines [`ChannelConverter`] and [`PcmResampler`] into one source-format-aware stage.
+///
+/// This is the exact boundary that finding 10 identified as broken: the previous engine
+/// code rebuilt conversion only when the source *rate* changed, so a mid-stream channel
+/// count change at an unchanged rate (mono <-> stereo) fell straight through unnoticed and
+/// stale-shaped samples reached the ring. Tracking `(rate, channels)` as one tuple here
+/// means either changing rebuilds both pieces together; a plain segment boundary that
+/// reports the same tuple again (the common HLS case) rebuilds neither, preserving
+/// continuity and avoiding an audible glitch on every segment.
+///
+/// Rebuilding also implicitly discards the old [`PcmResampler`]'s pending (not yet
+/// resampled) tail: a fresh resampler starts with empty internal state, so old-format
+/// samples can never be mixed into a chunk with new-format ones.
+pub struct ConversionStage {
+    device: OutputFormat,
+    source_format: Option<(u32, u16)>,
+    converter: Option<ChannelConverter>,
+    resampler: Option<PcmResampler>,
+}
+
+impl ConversionStage {
+    #[must_use]
+    pub fn new(device: OutputFormat) -> Self {
+        Self {
+            device,
+            source_format: None,
+            converter: None,
+            resampler: None,
+        }
+    }
+
+    /// The most recently seen source format, or `None` before the first block.
+    #[must_use]
+    pub fn source_format(&self) -> Option<(u32, u16)> {
+        self.source_format
+    }
+
+    /// Convert and resample one decoded block to the device format.
+    ///
+    /// Returns the processed interleaved samples (in the device's channel count and rate)
+    /// and whether this call rebuilt conversion because `(source_rate, source_channels)`
+    /// differed from the previous call - `true` on the very first block and on any genuine
+    /// format change, `false` on an ordinary same-format segment boundary.
+    pub fn process(
+        &mut self,
+        source_rate: u32,
+        source_channels: u16,
+        samples: &[f32],
+    ) -> Result<(Vec<f32>, bool), ResampleError> {
+        let format = (source_rate, source_channels);
+        let changed = self.source_format != Some(format);
+        if changed {
+            self.source_format = Some(format);
+            self.converter = Some(ChannelConverter::new(source_channels, self.device.channels));
+            self.resampler = Some(PcmResampler::new(source_rate, self.device)?);
+        }
+        let converted = match self.converter.as_mut() {
+            Some(c) => c.convert(samples).to_vec(),
+            None => samples.to_vec(),
+        };
+        let resampled = match self.resampler.as_mut() {
+            Some(r) => r.process(&converted)?.to_vec(),
+            None => converted,
+        };
+        Ok((resampled, changed))
+    }
+}
+
+// ---------------------------------------------------------------------------------------
 // Start/rebuffer hysteresis
 // ---------------------------------------------------------------------------------------
 
@@ -493,6 +569,174 @@ impl BufferGate {
             _ => {}
         }
         previous != self.state
+    }
+}
+
+/// Lock-free bridge that reports the current [`BufferState`] from the audio callback
+/// (writer, via [`GatedConsumer`]) to any other thread that wants to observe transitions
+/// (reader, typically the decode thread deciding whether to tell the controller). A single
+/// `AtomicU8` is all that's needed: readers only ever care about the latest value, never
+/// about ordering it against other memory, so `Ordering::Relaxed` would even suffice: the
+/// slightly stronger Release/Acquire pair costs nothing extra on the platforms this app
+/// targets and documents the intent more clearly.
+///
+/// This is what lets finding 5's buffering/recovery cycles be reported repeatedly instead
+/// of the old one-way `announced_playing` flag: a reader just compares this against the
+/// last value it saw and reacts to every transition, in either direction, for as long as
+/// the session runs.
+#[derive(Debug)]
+pub struct BufferStateFlag(AtomicU8);
+
+impl BufferStateFlag {
+    #[must_use]
+    pub fn new(initial: BufferState) -> Self {
+        Self(AtomicU8::new(Self::encode(initial)))
+    }
+
+    fn encode(state: BufferState) -> u8 {
+        match state {
+            BufferState::Buffering => 0,
+            BufferState::Playing => 1,
+        }
+    }
+
+    fn decode(value: u8) -> BufferState {
+        if value == 1 {
+            BufferState::Playing
+        } else {
+            BufferState::Buffering
+        }
+    }
+
+    /// Callback-safe: a single atomic store.
+    pub fn set(&self, state: BufferState) {
+        self.0.store(Self::encode(state), Ordering::Release);
+    }
+
+    /// Safe to call from any thread, including the callback, but intended for observers
+    /// outside it.
+    #[must_use]
+    pub fn get(&self) -> BufferState {
+        Self::decode(self.0.load(Ordering::Acquire))
+    }
+}
+
+impl Default for BufferStateFlag {
+    fn default() -> Self {
+        Self::new(BufferState::Buffering)
+    }
+}
+
+/// Wraps a [`RingConsumer`] with a [`BufferGate`] so **consumption itself** - not just the
+/// first "reached playing" announcement - honors the start/rebuffer thresholds.
+///
+/// This is finding 5's core fix. Previously `BufferGate` only decided when the decode
+/// thread was allowed to *announce* playback; the actual audio callback popped from the
+/// ring unconditionally regardless of gate state, so a starved ring played back audio in
+/// dribs and drabs as it trickled in rather than holding off until a healthy amount had
+/// re-accumulated. Here, while [`BufferState::Buffering`], [`GatedConsumer::pop_into`]
+/// fills the caller's buffer with silence and leaves every queued frame in the ring
+/// untouched (it never calls into the inner ring's `pop_into` at all), so audio already
+/// queued survives a stall instead of draining out from under the gate while it waits to
+/// cross the start threshold. Once occupancy reaches that threshold, real consumption
+/// resumes; if it later falls to/under the (lower) rebuffer threshold, the gate falls back
+/// to `Buffering` and the ring must refill all the way back up to the start threshold
+/// again before playing resumes - the same hysteresis `BufferGate` already provides, now
+/// actually gating audio rather than only an announcement.
+///
+/// Every method here stays within the module's real-time-safety discipline: no
+/// allocation, no locking beyond the ring's own lock-free atomics plus one extra
+/// `AtomicU8` store, no I/O, no panicking path.
+pub struct GatedConsumer {
+    inner: RingConsumer,
+    gate: BufferGate,
+    state: Arc<BufferStateFlag>,
+}
+
+impl GatedConsumer {
+    #[must_use]
+    pub fn new(
+        inner: RingConsumer,
+        start_frames: usize,
+        rebuffer_frames: usize,
+        state: Arc<BufferStateFlag>,
+    ) -> Self {
+        let gate = BufferGate::new(start_frames, rebuffer_frames);
+        state.set(gate.state());
+        Self { inner, gate, state }
+    }
+
+    /// RT-safe. See the type-level doc comment.
+    pub fn pop_into(&mut self, out: &mut [f32]) -> usize {
+        let occupied = self.inner.occupied_frames();
+        if self.gate.update(occupied) {
+            self.state.set(self.gate.state());
+        }
+        match self.gate.state() {
+            BufferState::Buffering => {
+                out.fill(0.0);
+                0
+            }
+            BufferState::Playing => self.inner.pop_into(out),
+        }
+    }
+
+    #[must_use]
+    pub fn capacity_frames(&self) -> usize {
+        self.inner.capacity_frames()
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Control channel: off-callback settings, applied callback-safely
+// ---------------------------------------------------------------------------------------
+
+/// Non-real-time write side of a lock-free control channel (finding 6). Lives on whatever
+/// thread computes settings updates (e.g. the decode thread reacting to a volume/EQ
+/// change) - never the audio callback.
+pub struct ControlProducer<T> {
+    inner: Producer<T>,
+}
+
+/// Real-time-safe read side. Lives on the audio callback thread. `try_recv` is a single
+/// bounded, non-blocking `pop`: on an empty queue it returns `None` immediately rather than
+/// waiting, so draining it in a `while let Some(..)` loop at the top of a callback can
+/// never block on the producer.
+pub struct ControlConsumer<T> {
+    inner: Consumer<T>,
+}
+
+/// Build a bounded, lock-free single-producer/single-consumer control channel.
+///
+/// Intended for infrequent, small, `Copy`-friendly messages (settings changes), not a
+/// general-purpose queue. Both sides are nonblocking; a caller that finds the queue full
+/// keeps the latest update and retries from its ordinary control loop.
+#[must_use]
+pub fn control_channel<T>(capacity: usize) -> (ControlProducer<T>, ControlConsumer<T>) {
+    let (producer, consumer) = RingBuffer::<T>::new(capacity.max(1));
+    (
+        ControlProducer { inner: producer },
+        ControlConsumer { inner: consumer },
+    )
+}
+
+impl<T> ControlProducer<T> {
+    /// Attempts to deliver `value` without waiting. Returns the value when the bounded
+    /// queue is full so the caller can coalesce/retry it while still checking cancellation
+    /// and output health.
+    pub fn try_send(&mut self, value: T) -> Result<(), T> {
+        self.inner.push(value).map_err(|error| match error {
+            rtrb::PushError::Full(value) => value,
+        })
+    }
+}
+
+impl<T> ControlConsumer<T> {
+    /// RT-safe: a single non-blocking `pop`. Callers drain this in a bounded loop (bounded
+    /// by the channel's fixed capacity) at a point they control, never inside a blocking
+    /// wait.
+    pub fn try_recv(&mut self) -> Option<T> {
+        self.inner.pop().ok()
     }
 }
 
@@ -779,5 +1023,307 @@ mod tests {
         let format = OutputFormat::new(48_000, 2);
         assert_eq!(format.frames_for_millis(500), 24_000);
         assert_eq!(format.frames_for_millis(2000), 96_000);
+    }
+
+    // ---------------- Finding 5: GatedConsumer actually gates consumption ----------------
+
+    fn gated(
+        capacity_frames: usize,
+        start_frames: usize,
+        rebuffer_frames: usize,
+    ) -> (RingProducer, GatedConsumer, Arc<BufferStateFlag>) {
+        let format = OutputFormat::new(48_000, 2);
+        let (producer, consumer) = pcm_ring(format, capacity_frames);
+        let flag = Arc::new(BufferStateFlag::default());
+        let gated = GatedConsumer::new(consumer, start_frames, rebuffer_frames, Arc::clone(&flag));
+        (producer, gated, flag)
+    }
+
+    #[test]
+    fn below_start_threshold_no_queued_audio_is_consumed() {
+        let (mut producer, mut consumer, flag) = gated(1000, 100, 20);
+
+        // Push less than the start threshold.
+        let block: Vec<f32> = (0..50 * 2).map(|i| i as f32 + 1.0).collect();
+        producer.push_frames(&block);
+        assert_eq!(producer.occupied_frames(), 50);
+
+        let mut out = vec![f32::NAN; 200];
+        let real = consumer.pop_into(&mut out);
+        assert_eq!(real, 0, "buffering must report zero real frames");
+        assert!(out.iter().all(|&s| s == 0.0), "output must be silence");
+        assert_eq!(flag.get(), BufferState::Buffering);
+
+        // Crucially, the queued frames must still be there: nothing was drained.
+        assert_eq!(
+            producer.occupied_frames(),
+            50,
+            "buffering must not drain queued PCM"
+        );
+    }
+
+    #[test]
+    fn crossing_the_start_threshold_begins_real_consumption() {
+        let (mut producer, mut consumer, flag) = gated(1000, 100, 20);
+
+        let block: Vec<f32> = vec![0.5f32; 100 * 2];
+        producer.push_frames(&block);
+        assert_eq!(producer.occupied_frames(), 100);
+
+        let mut out = vec![0.0f32; 10 * 2];
+        let real = consumer.pop_into(&mut out);
+        assert_eq!(real, 10, "at the threshold, real audio must flow");
+        assert_eq!(flag.get(), BufferState::Playing);
+        assert!(out.iter().all(|&s| s == 0.5));
+        assert_eq!(
+            producer.occupied_frames(),
+            90,
+            "playing must actually drain the ring"
+        );
+    }
+
+    #[test]
+    fn starve_partially_refill_then_fully_refill_produces_exact_transitions() {
+        let (mut producer, mut consumer, flag) = gated(1000, 100, 20);
+        let mut out = vec![0.0f32; 10 * 2];
+
+        // Reach Playing.
+        producer.push_frames(&vec![1.0f32; 100 * 2]);
+        consumer.pop_into(&mut out);
+        assert_eq!(flag.get(), BufferState::Playing);
+
+        // Starve down to/under the rebuffer threshold by draining without refilling. Once
+        // occupancy hits 20 (the rebuffer threshold), the gate re-engages Buffering and
+        // consumption stops draining the ring entirely - the remaining 20 frames must
+        // survive rather than being drained to empty by further calls.
+        for _ in 0..9 {
+            consumer.pop_into(&mut out);
+        }
+        assert_eq!(
+            producer.occupied_frames(),
+            20,
+            "queued frames must be preserved once buffering re-engages, not drained further"
+        );
+        assert_eq!(
+            flag.get(),
+            BufferState::Buffering,
+            "falling to/under the rebuffer threshold must re-enter Buffering"
+        );
+
+        // Further pops while Buffering must keep reporting silence and must not touch the
+        // 20 frames still sitting in the ring.
+        let real = consumer.pop_into(&mut out);
+        assert_eq!(real, 0);
+        assert_eq!(producer.occupied_frames(), 20);
+
+        // Partial refill: 20 (preserved) + 50 = 70 frames, still short of the 100-frame
+        // start threshold.
+        producer.push_frames(&vec![2.0f32; 50 * 2]);
+        let real = consumer.pop_into(&mut out);
+        assert_eq!(real, 0, "a partial refill must not resume playback");
+        assert_eq!(flag.get(), BufferState::Buffering);
+        assert_eq!(
+            producer.occupied_frames(),
+            70,
+            "queued frames from both the starve-preserved tail and the partial refill \
+             must be preserved, not dropped"
+        );
+
+        // Full refill: 70 + 50 = 120 frames, crossing the start threshold again.
+        producer.push_frames(&vec![2.0f32; 50 * 2]);
+        assert_eq!(producer.occupied_frames(), 120);
+        let real = consumer.pop_into(&mut out);
+        assert_eq!(
+            real, 10,
+            "reaching the start threshold again must resume playback"
+        );
+        assert_eq!(flag.get(), BufferState::Playing);
+        // The ring is FIFO, so the very first frames to come out on resume must be the
+        // preserved 1.0-valued tail from before the starve, not the 2.0-valued refill -
+        // proof that the preserved frames were not just present in the count but actually
+        // intact and correctly ordered.
+        assert!(
+            out.iter().all(|&s| s == 1.0),
+            "the frames preserved through buffering must be played back before newer ones, \
+             got {out:?}"
+        );
+    }
+
+    #[test]
+    fn repeated_cycles_and_threshold_jitter_do_not_flap() {
+        let (mut producer, mut consumer, flag) = gated(2000, 200, 50);
+        let mut out = vec![0.0f32; 20 * 2];
+        let mut transitions = 0usize;
+        let mut last = flag.get();
+
+        for cycle in 0..5 {
+            producer.push_frames(&vec![0.1f32; 200 * 2]);
+            for _ in 0..20 {
+                consumer.pop_into(&mut out);
+                let current = flag.get();
+                if current != last {
+                    transitions += 1;
+                    last = current;
+                }
+            }
+            assert_eq!(
+                flag.get(),
+                BufferState::Buffering,
+                "cycle {cycle}: should have starved back to Buffering by now"
+            );
+        }
+        // Exactly one Buffering->Playing and one Playing->Buffering transition per cycle,
+        // never more (that would mean flapping around a threshold).
+        assert_eq!(
+            transitions, 10,
+            "expected exactly 2 transitions per cycle (10 total), got {transitions}"
+        );
+    }
+
+    // ---------------- Finding 10: ConversionStage tracks (rate, channels) ----------------
+
+    #[test]
+    fn a_channel_change_at_an_unchanged_rate_is_not_missed() {
+        let device = OutputFormat::new(48_000, 2);
+        let mut stage = ConversionStage::new(device);
+
+        let mono = sine(440.0, 44_100, 4096, 1);
+        let (_out1, changed1) = stage.process(44_100, 1, &mono).unwrap();
+        assert!(changed1, "the first block is always a format change");
+        assert_eq!(stage.source_format(), Some((44_100, 1)));
+
+        // Same rate, different channel count: must still be detected as a change.
+        let stereo = sine(440.0, 44_100, 4096, 2);
+        let (_out2, changed2) = stage.process(44_100, 2, &stereo).unwrap();
+        assert!(
+            changed2,
+            "a channel-count change at an unchanged rate must not be missed"
+        );
+        assert_eq!(stage.source_format(), Some((44_100, 2)));
+    }
+
+    #[test]
+    fn an_ordinary_segment_boundary_with_the_same_format_does_not_rebuild() {
+        let device = OutputFormat::new(48_000, 2);
+        let mut stage = ConversionStage::new(device);
+
+        let block_a = sine(440.0, 44_100, 4096, 2);
+        let (_out, changed1) = stage.process(44_100, 2, &block_a).unwrap();
+        assert!(changed1);
+
+        let block_b = sine(440.0, 44_100, 4096, 2);
+        let (_out, changed2) = stage.process(44_100, 2, &block_b).unwrap();
+        assert!(
+            !changed2,
+            "an ordinary same-format segment boundary must not report a change"
+        );
+    }
+
+    #[test]
+    fn a_pure_rate_change_without_a_channel_change_is_still_detected() {
+        let device = OutputFormat::new(48_000, 2);
+        let mut stage = ConversionStage::new(device);
+
+        stage
+            .process(44_100, 2, &sine(440.0, 44_100, 4096, 2))
+            .unwrap();
+        let (_out, changed) = stage
+            .process(48_000, 2, &sine(440.0, 48_000, 4096, 2))
+            .unwrap();
+        assert!(changed, "a rate-only change must still be detected");
+    }
+
+    #[test]
+    fn frame_counts_and_channel_mapping_are_correct_across_a_channel_change() {
+        let device = OutputFormat::new(48_000, 2);
+        let mut stage = ConversionStage::new(device);
+
+        // Mono at the device rate: bypasses resampling, so frame count is exact and each
+        // output frame duplicates the mono source into both device channels.
+        let mono_frames = 1000;
+        let mono: Vec<f32> = (0..mono_frames).map(|i| i as f32).collect();
+        let (out, _) = stage.process(48_000, 1, &mono).unwrap();
+        assert_eq!(
+            out.len(),
+            mono_frames * 2,
+            "mono->stereo must double sample count"
+        );
+        for (i, frame) in out.chunks(2).enumerate() {
+            assert_eq!(frame[0], mono[i]);
+            assert_eq!(frame[1], mono[i]);
+        }
+
+        // Now switch to a distinct per-channel stereo signal at the same rate.
+        let stereo_frames = 1000;
+        let mut stereo = Vec::with_capacity(stereo_frames * 2);
+        for i in 0..stereo_frames {
+            stereo.push(i as f32); // left
+            stereo.push(-(i as f32)); // right
+        }
+        let (out2, changed) = stage.process(48_000, 2, &stereo).unwrap();
+        assert!(
+            changed,
+            "mono -> stereo at an unchanged rate must be detected"
+        );
+        assert_eq!(
+            out2.len(),
+            stereo_frames * 2,
+            "matching channels is a passthrough"
+        );
+        assert_eq!(out2, stereo, "stereo passthrough must be sample-exact");
+    }
+
+    #[test]
+    fn a_format_change_discards_pending_resampler_state_rather_than_mixing_it() {
+        // Build up partial resampler input (short of one internal chunk) at one rate, then
+        // switch format before it would have flushed. The old partial state must not bleed
+        // into the new format's output.
+        let device = OutputFormat::new(48_000, 2);
+        let mut stage = ConversionStage::new(device);
+
+        // A resampling case (44100 -> 48000) with a tiny block, guaranteed to be less than
+        // one internal chunk, so it sits in the resampler's pending buffer unflushed.
+        let tiny = vec![1.0f32; 8 * 2];
+        stage.process(44_100, 2, &tiny).unwrap();
+
+        // Switch format (mono, same rate change) - must not panic, hang, or somehow return
+        // samples derived from the abandoned 44100/stereo pending state.
+        let mono = sine(440.0, 48_000, 2048, 1);
+        let (out, changed) = stage.process(48_000, 1, &mono).unwrap();
+        assert!(changed);
+        assert!(out.iter().all(|s| s.is_finite()));
+    }
+
+    // ---------------- Control channel ----------------
+
+    #[test]
+    fn control_channel_delivers_messages_in_order() {
+        let (mut tx, mut rx) = control_channel::<u32>(4);
+        assert_eq!(
+            rx.try_recv(),
+            None,
+            "empty queue must not block, must return None"
+        );
+
+        tx.try_send(1).unwrap();
+        tx.try_send(2).unwrap();
+        tx.try_send(3).unwrap();
+
+        assert_eq!(rx.try_recv(), Some(1));
+        assert_eq!(rx.try_recv(), Some(2));
+        assert_eq!(rx.try_recv(), Some(3));
+        assert_eq!(rx.try_recv(), None);
+    }
+
+    #[test]
+    fn control_channel_producer_returns_immediately_when_full() {
+        let (mut tx, mut rx) = control_channel::<u32>(2);
+        tx.try_send(1).unwrap();
+        tx.try_send(2).unwrap();
+        assert_eq!(tx.try_send(3), Err(3));
+        assert_eq!(rx.try_recv(), Some(1));
+        tx.try_send(3).unwrap();
+        assert_eq!(rx.try_recv(), Some(2));
+        assert_eq!(rx.try_recv(), Some(3));
     }
 }

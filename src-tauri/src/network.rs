@@ -26,9 +26,11 @@
 //! deliberately never calls Reqwest's `.timeout()`. That method is a
 //! *total* request timeout that covers the entire response body, and a live
 //! radio stream can legitimately stay connected for hours. Only
-//! `.connect_timeout()` (bounding the TCP/TLS handshake) plus our own
-//! inter-chunk stall detection in [`ContinuousTsStream::next_chunk`] apply
-//! to this profile.
+//! `.connect_timeout()` (bounding the TCP/TLS handshake), our own bounded
+//! wait for response headers after that (bounding a server that accepts the
+//! connection and then never answers - `connect_timeout` alone cannot see
+//! that), and our own inter-chunk stall detection in
+//! [`ContinuousTsStream::next_chunk`] apply to this profile.
 //!
 //! # Redaction
 //!
@@ -95,6 +97,13 @@ pub enum NetworkError {
     /// The continuous-TS profile detected no data for longer than its
     /// configured stall timeout, despite the connection never closing.
     Stalled,
+    /// The continuous-TS profile's initial request never received response
+    /// headers before `continuous_ts_response_timeout` elapsed. Distinct
+    /// from [`Self::Stalled`], which applies to gaps between chunks of an
+    /// already-open body: this is a server that accepts the TCP/TLS
+    /// connection (so `connect_timeout` is satisfied) and then never
+    /// answers at all.
+    ResponseTimedOut,
     /// Client construction or another Reqwest failure. Always pre-redacted;
     /// see [`redact_error`].
     Transport(String),
@@ -112,6 +121,9 @@ impl fmt::Display for NetworkError {
                 None => write!(f, "unsuccessful response status {status}"),
             },
             Self::Stalled => f.write_str("no data received before the stall timeout"),
+            Self::ResponseTimedOut => {
+                f.write_str("no response headers received before the timeout")
+            }
             Self::Transport(message) => write!(f, "network error: {message}"),
         }
     }
@@ -344,6 +356,12 @@ pub struct NetworkServiceConfig {
     /// Bounds only the TCP/TLS connect phase. See module docs: this profile
     /// intentionally has no total request timeout.
     pub continuous_ts_connect_timeout: Duration,
+    /// Bounds the wait for response headers *after* the TCP/TLS connection
+    /// is established, i.e. the case `continuous_ts_connect_timeout` cannot
+    /// cover: a server that accepts the connection and then never answers.
+    /// Still not a total-body timeout - once headers arrive this no longer
+    /// applies (see module docs on why the body itself must stay unbounded).
+    pub continuous_ts_response_timeout: Duration,
     /// Maximum gap allowed between two chunks of a continuous-TS body
     /// before [`ContinuousTsStream::next_chunk`] reports
     /// [`NetworkError::Stalled`].
@@ -370,6 +388,7 @@ impl Default for NetworkServiceConfig {
             // Matches the plan's documented current direct-TS
             // connect-to-play default.
             continuous_ts_connect_timeout: Duration::from_secs(20),
+            continuous_ts_response_timeout: Duration::from_secs(20),
             continuous_ts_stall_timeout: Duration::from_secs(15),
             hls_playlist_timeout: Duration::from_secs(10),
             hls_playlist_max_body_bytes: 512 * 1024,
@@ -394,6 +413,7 @@ pub struct NetworkService {
     artwork: Client,
     artwork_max_body_bytes: usize,
     continuous_ts: Client,
+    continuous_ts_response_timeout: Duration,
     continuous_ts_stall_timeout: Duration,
     hls_playlist: Client,
     hls_playlist_max_body_bytes: usize,
@@ -481,6 +501,7 @@ impl NetworkService {
             artwork,
             artwork_max_body_bytes: config.artwork_max_body_bytes,
             continuous_ts,
+            continuous_ts_response_timeout: config.continuous_ts_response_timeout,
             continuous_ts_stall_timeout: config.continuous_ts_stall_timeout,
             hls_playlist,
             hls_playlist_max_body_bytes: config.hls_playlist_max_body_bytes,
@@ -598,10 +619,20 @@ impl NetworkService {
     ) -> Result<ContinuousTsStream, NetworkError> {
         let parsed = parse_allowed_url(url)?;
         let request = self.continuous_ts.get(parsed);
+        // `connect_timeout` (set on this client, see `with_config`) only bounds the
+        // TCP/TLS handshake - it says nothing about a server that accepts the connection
+        // and then never answers. That case is otherwise unbounded here (deliberately, per
+        // module docs, for the body once headers arrive), so the wait for headers alone
+        // gets its own finite deadline.
         let response = tokio::select! {
             biased;
             () = cancel.cancelled() => return Err(NetworkError::Cancelled),
-            result = request.send() => result.map_err(transport_error)?,
+            outcome = tokio::time::timeout(self.continuous_ts_response_timeout, request.send()) => {
+                match outcome {
+                    Ok(result) => result.map_err(transport_error)?,
+                    Err(_elapsed) => return Err(NetworkError::ResponseTimedOut),
+                }
+            }
         };
         let status = response.status();
         if !status.is_success() {
@@ -1114,6 +1145,43 @@ mod tests {
         assert!(
             elapsed >= Duration::from_millis(1400),
             "expected the full slow body to be read (~1.6s), got {elapsed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn continuous_ts_profile_bounds_the_wait_for_response_headers() {
+        // Accepts the TCP connection (so `connect_timeout` is satisfied) and then never
+        // writes a single byte - the case `connect_timeout` cannot cover.
+        let (addr, _server) = spawn_server(|stream: TcpStream| async move {
+            // Hold the connection open (never read or write another byte) for the whole
+            // sleep. `stream` must be kept alive here, not just accepted and implicitly
+            // dropped - dropping it would close the connection immediately and produce a
+            // connection-reset error rather than the never-answers scenario under test.
+            let _stream = stream;
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+
+        let config = NetworkServiceConfig {
+            continuous_ts_response_timeout: Duration::from_millis(300),
+            ..NetworkServiceConfig::default()
+        };
+        let service = NetworkService::with_config(config).unwrap();
+        let cancel = CancellationToken::new();
+
+        let started = Instant::now();
+        let result = service
+            .open_continuous_stream(&base_url(addr, "/live.ts"), &cancel)
+            .await;
+        let elapsed = started.elapsed();
+
+        match result {
+            Err(NetworkError::ResponseTimedOut) => {}
+            Err(other) => panic!("expected ResponseTimedOut, got {other:?}"),
+            Ok(_) => panic!("expected the header wait to time out"),
+        }
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "a server that never answers must fail fast, took {elapsed:?}"
         );
     }
 

@@ -1,4 +1,7 @@
-use apogee_playback_core::detect::{Detection, Detector, SourceKind, Unsupported, select_variant};
+use apogee_playback_core::detect::{
+    Detection, Detector, SourceKind, Unsupported, classify_complete_hls_playlist,
+    is_encrypted_playlist, select_variant,
+};
 
 fn fixture(name: &str) -> Vec<u8> {
     std::fs::read(
@@ -189,6 +192,58 @@ fn an_exhausted_budget_reports_exhaustion_rather_than_asking_forever() {
         Detection::Unsupported(_) => {}
         other => panic!("a full budget must conclude, got {other:?}"),
     }
+}
+
+// -----------------------------------------------------------------
+// `classify_complete_hls_playlist` / `is_encrypted_playlist`: the
+// whole-body reclassification step callers must run once a complete
+// playlist has been read (finding 8 - see `playback::source::open`).
+// -----------------------------------------------------------------
+
+#[test]
+fn complete_body_classification_finds_a_master_tag_anywhere_in_the_body() {
+    // A large gap between the header and the deciding tag is exactly the
+    // shape that a bounded, prefix-only classification would get wrong.
+    let mut master = b"#EXTM3U\n".to_vec();
+    master.extend(std::iter::repeat_n(b'#', 70_000));
+    master.extend_from_slice(b"\n#EXT-X-STREAM-INF:BANDWIDTH=128000\nlow.m3u8\n");
+    assert_eq!(
+        classify_complete_hls_playlist(&master),
+        Ok(SourceKind::HlsMasterPlaylist)
+    );
+}
+
+#[test]
+fn complete_body_classification_finds_an_encryption_tag_anywhere_in_the_body() {
+    let mut playlist = b"#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n".to_vec();
+    playlist.extend(std::iter::repeat_n(b'#', 70_000));
+    playlist.extend_from_slice(
+        b"\n#EXT-X-KEY:METHOD=AES-128,URI=\"https://example.invalid/key\"\n\
+          #EXTINF:2.0,\nseg0.ts\n",
+    );
+    assert_eq!(
+        classify_complete_hls_playlist(&playlist),
+        Err(Unsupported::EncryptedPlaylist)
+    );
+    assert!(is_encrypted_playlist(&playlist));
+}
+
+#[test]
+fn complete_body_classification_without_master_or_key_tags_is_media() {
+    let playlist = b"#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n\
+#EXTINF:2.0,\nseg0.ts\n";
+    assert_eq!(
+        classify_complete_hls_playlist(playlist),
+        Ok(SourceKind::HlsMediaPlaylist)
+    );
+    assert!(!is_encrypted_playlist(playlist));
+}
+
+#[test]
+fn is_encrypted_playlist_survives_bom_and_leading_whitespace() {
+    let mut body = vec![0xEF, 0xBB, 0xBF];
+    body.extend_from_slice(b"\r\n  \n#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"k\"\n");
+    assert!(is_encrypted_playlist(&body));
 }
 
 #[test]

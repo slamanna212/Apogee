@@ -181,6 +181,38 @@ describe('selectChannel', () => {
     expect(usePlayerStore.getState().errorMessage).toBe('Upstream closed the connection');
   });
 
+  it('a stale rejection does not clobber a newer channel selection', async () => {
+    // Rust now routes ordinary startup failures through a snapshot instead of rejecting the
+    // invoke (see commands.rs's `handle_startup_failure`), so a thrown rejection here models
+    // an exceptional, slow-to-arrive failure racing a newer selection - not the normal retry
+    // path. The stale rejection must never overwrite state the user has already moved past.
+    let rejectFirst: (err: Error) => void = () => {};
+    const firstCallPromise = new Promise<Snapshot>((_resolve, reject) => {
+      rejectFirst = reject;
+    });
+    vi.mocked(playerPlay).mockImplementationOnce(() => firstCallPromise);
+
+    const firstSelect = usePlayerStore.getState().selectChannel(channel, creds);
+    firstSelect.catch(() => {}); // Its eventual rejection is asserted on below, not here.
+
+    const otherChannel: XtreamChannel = { ...channel, stream_id: 99 };
+    vi.mocked(playerPlay).mockResolvedValueOnce(
+      snapshot({ state: 'playing', stationId: '99' }),
+    );
+    await usePlayerStore.getState().selectChannel(otherChannel, creds);
+    expect(usePlayerStore.getState().status).toBe('playing');
+    expect(usePlayerStore.getState().currentChannel?.stream_id).toBe(99);
+
+    // The first (now stale) attempt's failure finally arrives.
+    rejectFirst(new Error('stale device error'));
+    await flushAsync();
+    await expect(firstSelect).rejects.toThrow('stale device error');
+
+    expect(usePlayerStore.getState().status).toBe('playing');
+    expect(usePlayerStore.getState().currentChannel?.stream_id).toBe(99);
+    expect(usePlayerStore.getState().errorMessage).toBeNull();
+  });
+
   it('never builds a stream URL or retries - Rust owns connection attempts', async () => {
     await usePlayerStore.getState().selectChannel(channel, creds);
     for (const args of vi.mocked(playerPlay).mock.calls.map((c) => c[0])) {

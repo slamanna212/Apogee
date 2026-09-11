@@ -25,6 +25,7 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
+use apogee_playback_core::detect::{is_encrypted_playlist, Unsupported};
 use apogee_playback_core::pipeline::{HlsIngest, PipelineError, SourceEvent};
 use hls_runtime::client::{Action, HlsClient};
 use tokio_util::sync::CancellationToken;
@@ -71,6 +72,14 @@ impl HlsSource {
         network: NetworkService,
         cancel: CancellationToken,
     ) -> Result<Self, SourceError> {
+        // Defense in depth: every caller of `open()` already runs the
+        // initial/variant body through `classify_complete_hls_playlist`
+        // before reaching here, but `HlsClient::on_playlist` itself
+        // (`broadcast_hls::MediaPlaylist::parse`) has no opinion on
+        // `#EXT-X-KEY` at all - it just parses the attributes. Checking
+        // again at this single choke point means the policy holds even if
+        // a future caller is added that skips the caller-side check.
+        reject_if_encrypted(initial_body)?;
         let mut client = HlsClient::new(playlist_final_url.to_string());
         match client.poll() {
             Some(Action::FetchPlaylist { .. }) => {}
@@ -139,10 +148,20 @@ impl HlsSource {
                     .fetch_hls_playlist(&request_url, &self.cancel)
                     .await
                 {
-                    Ok(body) => self
-                        .client
-                        .on_playlist(&body.bytes)
-                        .map_err(|error| SourceError::Demux(redact_text(&error.to_string()))),
+                    Ok(body) => {
+                        // A live origin can add `#EXT-X-KEY` to a reload
+                        // that started out unencrypted - the *initial*
+                        // playlist carrying no encryption tag says nothing
+                        // about later ones (finding 8). Every reload gets
+                        // the same full-body check the initial fetch did,
+                        // before it ever reaches `HlsClient::on_playlist`,
+                        // so a later encryption tag cannot bypass policy by
+                        // arriving after startup instead of during it.
+                        reject_if_encrypted(&body.bytes)?;
+                        self.client
+                            .on_playlist(&body.bytes)
+                            .map_err(|error| SourceError::Demux(redact_text(&error.to_string())))
+                    }
                     Err(NetworkError::Cancelled) => Err(SourceError::Cancelled),
                     Err(error) => {
                         // hls-runtime clears its "requested" bookkeeping for
@@ -195,6 +214,17 @@ impl HlsSource {
             _ => Ok(()),
         }
     }
+}
+
+/// Rejects a playlist body carrying `#EXT-X-KEY` before it can reach
+/// `HlsClient::on_playlist`, which has no encryption policy of its own to
+/// enforce this. See the callers in [`HlsSource::from_initial_playlist`]
+/// and [`HlsSource::service`].
+fn reject_if_encrypted(body: &[u8]) -> Result<(), SourceError> {
+    if is_encrypted_playlist(body) {
+        return Err(SourceError::from(Unsupported::EncryptedPlaylist));
+    }
+    Ok(())
 }
 
 fn pipeline_error_to_source(error: PipelineError) -> SourceError {

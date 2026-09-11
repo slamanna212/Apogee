@@ -2,16 +2,17 @@
 
 ## Current status
 
-M0 complete; M1 not started. MPV remains the production player until the replacement passes the plan's parity and hardware checks. `playback-core` is an isolated crate with its own `[workspace]`, deliberately not wired into the app, so it cannot affect playback yet. No physical audio has been played through it.
+M1-M5 are implemented in the working tree. The Rust engine is the production playback path and MPV has been removed. Linux audible playback was confirmed on 2026-09-10; the corrective review in `rustaudiofixes.md` was implemented on 2026-09-11. Windows/macOS execution, device hotplug/default-following hardware checks, and a controlled updater install remain manual release gates.
 
 | Milestone | Status | Evidence / remaining work |
 | --- | --- | --- |
 | M0: dependencies, baseline, fixtures | Complete | Crate builds; 4 tests pass, incl. direct-TS vs HLS bit-exact PCM parity on real provider audio |
 | M1: networking | Complete | NetworkService plus the full API migration; plugin-http removed |
 | M2: source-to-PCM | Complete | Detection, shared pipeline, both ingest adapters, networked TS and HLS sources; 84 tests |
-| M3: output/controller | Complete (backend) | Engine, CPAL output, devices, Tauri commands; end-to-end decode to device proven. Audible confirmation outstanding |
-| M4: parity | Complete, awaiting audible confirmation | Frontend swapped to the engine; 127 Rust + 189 frontend tests |
-| M5: cleanup/release validation | Code complete | MPV removed; platform acceptance outstanding for Windows/macOS |
+| M3: output/controller | Complete (automated + prior Linux audible check) | Callback gates consumption; EQ/volume affect queued PCM; post-control visualizer uses a bounded worker; rate/channel changes rebuild conversion |
+| M4: active devices | Complete (automated); hardware matrix pending | Active selection restarts safely under a new generation; system default is followed by bounded polling; requested and effective devices remain separate |
+| M5: AppImage signing | Complete (code); CI/manual artifact run pending | AppImage is finalized before signing; pinned repack tools; serialized manifest updates; no post-sign mutation |
+| M6: integrated acceptance | Partial | 195 Rust and 187 frontend tests pass; builds/checks pass; native Windows/macOS and remaining hardware/artifact checks pending |
 
 ## Work log
 
@@ -312,16 +313,18 @@ Two further CPAL 0.18 API differences found by compiling rather than assuming: t
 takes `cpal::Error` (not a separate `StreamError` type), and `build_output_stream` takes its config by
 value.
 
-## M3/M4 backend complete: 127 tests
+## Historical M3/M4 checkpoint: 127 tests
 
 `src/playback/` now holds `engine.rs` (session wiring), `audio_out.rs` (CPAL owner),
 `device.rs` (enumeration and migration) and `commands.rs` (Tauri adapter). Typed commands
 replace MPV's arbitrary property strings: play, stop, volume, mute, equalizer, list/set/migrate
 device, visualiser toggle, and snapshot.
 
-Threading follows the plan's ownership rules exactly. Network and HLS timers run as a Tokio task;
-demux, decode, EQ and resampling run on a **dedicated OS thread**, never on a Tokio worker; the CPAL
-callback only pops a lock-free ring. Teardown order matters and is deliberate: cancel the token, drop
+Threading follows the plan's ownership rules. Network and HLS timers run as a Tokio task; demux,
+decode and resampling run on a **dedicated OS thread**, never on a Tokio worker. The CPAL callback
+gates ring consumption and applies precomputed EQ coefficients plus ramped gain without allocation,
+locking or I/O. Post-control samples enter a bounded nonblocking tap consumed by a separate FFT
+worker. Teardown order matters and is deliberate: cancel the token, drop
 the event sender to wake a parked decode thread, drop the output to join the audio thread, then join
 decode. That is what makes a station switch safe rather than racy.
 
@@ -332,7 +335,30 @@ than the device's 48000, that bitrate lands in the AAC range rather than reporti
 throughput, that teardown completes in well under a second, and that an HTML error body fails the
 session instead of hanging.
 
-MPV remains registered and functional. Nothing has been removed.
+MPV and its capture path have been removed from production.
+
+### Corrective review completed 2026-09-11
+
+The original M3 implementation announced buffering but did not make the callback obey it, and it
+processed volume/EQ/FFT before the two-second PCM queue. The callback now emits silence without
+draining during startup/rebuffering, applies ready-made controls to the next consumed frames, and
+reports every buffering/playing transition through atomics. The FFT worker can fall behind only by
+dropping analysis samples; it cannot block audio. Conversion tracks `(sample_rate, channels)`, so
+mono/stereo changes at a stable rate rebuild state and discard pending old-format resampler input.
+
+Each retry now also has an internal attempt identity in addition to its station generation. Starting
+a retry invalidates the previous identity before teardown, preventing a late watchdog/output event
+from scheduling a duplicate retry. Active device changes deliberately reconnect the station under a
+new generation after closing the old session. CPAL has no portable default-device notification API,
+so system-default mode polls every two seconds outside the callback and reopens only when the
+effective default id changes. A missing specific device falls back without erasing the saved choice.
+The healthy fallback stream does not automatically jump back when that specific device reappears;
+the user must select it again, or a later session/retry will resolve the preserved preference.
+
+The 2026-09-11 local unsigned AppImage validation reached a successful optimized application build,
+then Tauri timed out downloading its `AppRun`/`linuxdeploy` helpers before an AppImage was produced.
+The packaging scripts and workflow YAML pass local syntax checks, and the pinned tool/runtime hashes
+were verified, but final extraction/signature/updater verification remains an artifact-run gate.
 
 ## Visualiser: recalibrated, not copied
 
@@ -360,7 +386,7 @@ gradually rather than snapping, and a low-rate device does not produce garbage i
 
 Analysis is skipped entirely when the visualiser is off, so a hidden display costs nothing.
 
-## M4 complete: the app now plays through the new engine
+## Historical M4 checkpoint: the app now plays through the new engine
 
 316 tests pass (127 Rust, 189 frontend). Lint shows only the two pre-existing ChannelCard warnings,
 `npm run build` and `cargo build` are clean, and three pre-existing clippy warnings remain in files
@@ -397,8 +423,8 @@ every connect. The MPV subprocess reset its state per `loadfile`; the CPAL outpu
 and does not. Volume and mute also now apply with no station selected, since they are properties of
 the output stage rather than of a playback session.
 
-**MPV is still registered and functional in the backend.** Nothing has been deleted and nothing is
-committed. See `symphonia-manual-test-guide.md`.
+At this checkpoint MPV was still registered as a rollback path. M5 subsequently removed it; the
+current state is described below. See `symphonia-manual-test-guide.md`.
 
 ## M5 complete (code)
 

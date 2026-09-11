@@ -131,6 +131,9 @@ jobs:
       contents: write
     strategy:
       fail-fast: false
+      # Each platform merges its updater entry into the release's existing latest.json.
+      # Serialize those read/modify/write uploads so concurrent jobs cannot lose entries.
+      max-parallel: 1
       matrix:
         include:
           - platform: 'ubuntu-22.04'
@@ -204,7 +207,14 @@ jobs:
           "
           VERSION="$VERSION" perl -i -pe 'BEGIN{$done=0} if (!$done && s/^version = ".*"/version = "$ENV{VERSION}"/) { $done=1 }' src-tauri/Cargo.toml
 
-      - name: Build and release
+      # See the matching comment in release.yml for why Linux is split into
+      # three steps instead of tauri-action's single build+sign+upload call:
+      # the AppImage must be repacked to drop a bundled host-interface
+      # library (#67) before it is signed, and the installed Tauri CLI has
+      # no hook between linuxdeploy staging an AppDir and it packaging the
+      # final AppImage, nor between bundling and signing.
+      - name: Build and release (Windows/macOS)
+        if: matrix.platform != 'ubuntu-22.04'
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -222,19 +232,47 @@ jobs:
           releaseDraft: true
           prerelease: true
 
-      - name: Fix AppImage host-interface libraries (#67)
+      - name: Build Linux bundles (unsigned)
+        if: matrix.platform == 'ubuntu-22.04'
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STELLAR_API_KEY: ${{ secrets.STELLAR_API_KEY }}
+          LASTFM_SHARED_SECRET: ${{ secrets.LASTFM_SHARED_SECRET }}
+        with:
+          args: '--no-sign'
+
+      - name: Finalize AppImage and sign Linux updater artifacts
+        if: matrix.platform == 'ubuntu-22.04'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: scripts/finalize-and-sign-linux-bundles.sh
+
+      - name: Upload Linux bundles and updater manifest
+        if: matrix.platform == 'ubuntu-22.04'
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STELLAR_API_KEY: ${{ secrets.STELLAR_API_KEY }}
+          LASTFM_SHARED_SECRET: ${{ secrets.LASTFM_SHARED_SECRET }}
+        with:
+          args: '--no-bundle'
+          tagName: ${{ needs.check-version.outputs.tag }}
+          releaseId: ${{ needs.prepare-release.outputs.release_id }}
+          releaseDraft: true
+          prerelease: true
+
+      - name: Upload Linux checksums
         if: matrix.platform == 'ubuntu-22.04'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          TAG="${{ needs.check-version.outputs.tag }}"
-          APPIMAGE="$(ls src-tauri/target/release/bundle/appimage/*.AppImage)"
-          scripts/fix-appimage-host-libs.sh "$APPIMAGE"
-          # tauri-action already uploaded the flawed build above under this
-          # same filename; overwrite that release asset with the fixed one.
-          gh release upload "$TAG" "$APPIMAGE" --repo "${{ github.repository }}" --clobber
+        run: >-
+          gh release upload "${{ needs.check-version.outputs.tag }}"
+          src-tauri/target/release/bundle/SHA256SUMS-linux-x86_64.txt
+          --repo "${{ github.repository }}" --clobber
 
       - name: Validate packaged macOS application
         if: matrix.platform == 'macos-latest'

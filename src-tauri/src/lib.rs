@@ -111,6 +111,8 @@ pub fn run() {
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
             log::info!("startup: desktop updater initialized");
 
+            playback::commands::start_default_device_watcher(app.handle().clone());
+
             // No Windows Job Object any more. It existed solely to guarantee the mpv
             // subprocess died with Apogee; audio is now decoded in-process, so there is
             // no child process to outlive us and nothing to contain.

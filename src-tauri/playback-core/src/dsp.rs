@@ -107,9 +107,130 @@ impl State {
     }
 }
 
+/// Precomputed EQ coefficients and headroom, built off the audio callback.
+///
+/// This is one half of finding 6's EQ split. Building this evaluates a 1024-point response
+/// sweep across all ten bands ([`peak_response`]) - not expensive in absolute terms, but
+/// real enough that it must never run on an audio callback thread. `Copy` and small enough
+/// to send across a lock-free channel (see `output::control_channel`) to whatever thread
+/// actually applies it via [`Equalizer::apply_coefficients`], the callback-safe half.
+#[derive(Debug, Clone, Copy)]
+pub struct EqCoefficients {
+    coefficients: [Coefficients; BANDS.len()],
+    headroom: f32,
+    enabled: bool,
+}
+
+impl EqCoefficients {
+    /// Validates and builds coefficients/headroom for `sample_rate`. Off-callback only.
+    pub fn build(sample_rate: f64, enabled: bool, gains_db: &[f64]) -> Result<Self, String> {
+        if gains_db.len() != BANDS.len() {
+            return Err(format!("equalizer requires exactly {} bands", BANDS.len()));
+        }
+        if let Some(bad) = gains_db
+            .iter()
+            .find(|g| !g.is_finite() || **g < MIN_GAIN_DB || **g > MAX_GAIN_DB)
+        {
+            return Err(format!(
+                "equalizer gains must be finite values from {MIN_GAIN_DB} to {MAX_GAIN_DB} dB (got {bad})"
+            ));
+        }
+
+        if !enabled {
+            return Ok(Self {
+                coefficients: [Coefficients::bypass(); BANDS.len()],
+                headroom: 1.0,
+                enabled: false,
+            });
+        }
+
+        let mut coefficients = [Coefficients::bypass(); BANDS.len()];
+        for (i, (&centre, &gain)) in BANDS.iter().zip(gains_db.iter()).enumerate() {
+            coefficients[i] = Coefficients::peaking(sample_rate, centre, gain);
+        }
+
+        // MPV prefixed `volume=-{max_boost}dB`, i.e. it reserved headroom for the single
+        // largest boost. That is not enough: adjacent peaking bands overlap, so their
+        // magnitude responses multiply. Measured here, ten bands at +12 dB peak at 2.17
+        // after MPV's headroom, which clips hard. Instead of copying that flaw, the true
+        // worst-case gain of the whole cascade is measured and inverted. For a single
+        // boosted band the two agree, so ordinary settings behave as before.
+        let peak = peak_response(sample_rate, &coefficients);
+        let headroom = if peak > 1.0 { (1.0 / peak) as f32 } else { 1.0 };
+        Ok(Self {
+            coefficients,
+            headroom,
+            enabled: true,
+        })
+    }
+
+    #[must_use]
+    pub fn headroom(&self) -> f32 {
+        self.headroom
+    }
+
+    #[must_use]
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
+}
+
+/// Largest magnitude the configured filter cascade applies at any frequency.
+///
+/// Evaluated on a log-spaced grid off the audio callback, never in [`Equalizer::process`].
+/// A grid can in principle miss a very narrow peak between points, so the grid is dense
+/// relative to the one-octave bandwidth actually in use.
+fn peak_response(sample_rate: f64, coefficients: &[Coefficients; BANDS.len()]) -> f64 {
+    const POINTS: usize = 1024;
+    let nyquist = sample_rate * 0.5;
+    if nyquist <= 0.0 {
+        return 1.0;
+    }
+    let (lo, hi) = (10.0f64, nyquist * 0.999);
+    let ratio = (hi / lo).powf(1.0 / (POINTS - 1) as f64);
+
+    let mut peak: f64 = 0.0;
+    let mut freq = lo;
+    for _ in 0..POINTS {
+        let w = 2.0 * std::f64::consts::PI * freq / sample_rate;
+        let (cos1, sin1) = ((-w).cos(), (-w).sin());
+        let (cos2, sin2) = ((-2.0 * w).cos(), (-2.0 * w).sin());
+
+        let mut magnitude = 1.0f64;
+        for c in coefficients {
+            let (b0, b1, b2) = (f64::from(c.b0), f64::from(c.b1), f64::from(c.b2));
+            let (a1, a2) = (f64::from(c.a1), f64::from(c.a2));
+            let num_re = b0 + b1 * cos1 + b2 * cos2;
+            let num_im = b1 * sin1 + b2 * sin2;
+            let den_re = 1.0 + a1 * cos1 + a2 * cos2;
+            let den_im = a1 * sin1 + a2 * sin2;
+            let den = (den_re * den_re + den_im * den_im).sqrt();
+            if den > f64::EPSILON {
+                magnitude *= (num_re * num_re + num_im * num_im).sqrt() / den;
+            }
+        }
+        peak = peak.max(magnitude);
+        freq *= ratio;
+    }
+    peak
+}
+
+/// One settings snapshot delivered from off-callback settings handling to the audio
+/// callback (finding 6). `Copy` so sending it across `output::control_channel` never
+/// requires an allocation on either side.
+#[derive(Debug, Clone, Copy)]
+pub struct ControlUpdate {
+    pub eq: EqCoefficients,
+    pub volume: u8,
+    pub muted: bool,
+}
+
 /// Ten-band equaliser plus smoothed output gain.
 ///
-/// Coefficients are computed in [`Equalizer::configure`], never in [`Equalizer::process`].
+/// [`Equalizer::apply_coefficients`] is the only coefficient-setting method safe to call
+/// from an audio callback: it just copies an already-built [`EqCoefficients`]. Building
+/// one (`EqCoefficients::build`, or the [`Equalizer::configure`] convenience wrapper around
+/// it) sweeps the filter response and must run off the callback thread - see finding 6.
 #[derive(Debug)]
 pub struct Equalizer {
     sample_rate: f64,
@@ -167,39 +288,27 @@ impl Equalizer {
     ///
     /// Returns an error rather than clamping silently, so an out-of-range value is a bug
     /// that surfaces instead of a quiet difference from the UI.
+    ///
+    /// Not callback-safe (it calls [`EqCoefficients::build`], which sweeps the filter
+    /// response). Off-callback callers that already have a full `AudioSettings` update to
+    /// apply immediately (tests, or a caller with no separate callback thread) can use
+    /// this directly; a real audio pipeline should instead build an [`EqCoefficients`] /
+    /// [`ControlUpdate`] off-callback and hand it to [`Equalizer::apply_coefficients`] on
+    /// the callback thread.
     pub fn configure(&mut self, enabled: bool, gains_db: &[f64]) -> Result<(), String> {
-        if gains_db.len() != BANDS.len() {
-            return Err(format!("equalizer requires exactly {} bands", BANDS.len()));
-        }
-        if let Some(bad) = gains_db
-            .iter()
-            .find(|g| !g.is_finite() || **g < MIN_GAIN_DB || **g > MAX_GAIN_DB)
-        {
-            return Err(format!(
-                "equalizer gains must be finite values from {MIN_GAIN_DB} to {MAX_GAIN_DB} dB (got {bad})"
-            ));
-        }
-
-        self.enabled = enabled;
-        if !enabled {
-            self.coefficients = [Coefficients::bypass(); BANDS.len()];
-            self.headroom = 1.0;
-            return Ok(());
-        }
-
-        for (i, (&centre, &gain)) in BANDS.iter().zip(gains_db.iter()).enumerate() {
-            self.coefficients[i] = Coefficients::peaking(self.sample_rate, centre, gain);
-        }
-
-        // MPV prefixed `volume=-{max_boost}dB`, i.e. it reserved headroom for the single
-        // largest boost. That is not enough: adjacent peaking bands overlap, so their
-        // magnitude responses multiply. Measured here, ten bands at +12 dB peak at 2.17
-        // after MPV's headroom, which clips hard. Instead of copying that flaw, the true
-        // worst-case gain of the whole cascade is measured and inverted. For a single
-        // boosted band the two agree, so ordinary settings behave as before.
-        let peak = self.peak_response();
-        self.headroom = if peak > 1.0 { (1.0 / peak) as f32 } else { 1.0 };
+        let built = EqCoefficients::build(self.sample_rate, enabled, gains_db)?;
+        self.apply_coefficients(&built);
         Ok(())
+    }
+
+    /// Callback-safe: assigns already-computed coefficients/headroom/enabled. No
+    /// allocation, no trigonometry, no locking - just copying a small, already-built
+    /// value. This is the callback-safe half of finding 6's EQ split; the heavy
+    /// computation lives in [`EqCoefficients::build`], which must run off the callback.
+    pub fn apply_coefficients(&mut self, built: &EqCoefficients) {
+        self.enabled = built.enabled;
+        self.coefficients = built.coefficients;
+        self.headroom = built.headroom;
     }
 
     /// Set output gain as 0..=100 volume and a mute flag.
@@ -221,46 +330,6 @@ impl Equalizer {
         } else {
             (target - self.current_gain) / ramp_frames as f32
         };
-    }
-
-    /// Largest magnitude the configured filter cascade applies at any frequency.
-    ///
-    /// Evaluated on a log-spaced grid at configure time, never in the audio callback.
-    /// A grid can in principle miss a very narrow peak between points, so the grid is
-    /// dense relative to the one-octave bandwidth actually in use.
-    fn peak_response(&self) -> f64 {
-        const POINTS: usize = 1024;
-        let nyquist = self.sample_rate * 0.5;
-        if nyquist <= 0.0 {
-            return 1.0;
-        }
-        let (lo, hi) = (10.0f64, nyquist * 0.999);
-        let ratio = (hi / lo).powf(1.0 / (POINTS - 1) as f64);
-
-        let mut peak: f64 = 0.0;
-        let mut freq = lo;
-        for _ in 0..POINTS {
-            let w = 2.0 * std::f64::consts::PI * freq / self.sample_rate;
-            let (cos1, sin1) = ((-w).cos(), (-w).sin());
-            let (cos2, sin2) = ((-2.0 * w).cos(), (-2.0 * w).sin());
-
-            let mut magnitude = 1.0f64;
-            for c in &self.coefficients {
-                let (b0, b1, b2) = (f64::from(c.b0), f64::from(c.b1), f64::from(c.b2));
-                let (a1, a2) = (f64::from(c.a1), f64::from(c.a2));
-                let num_re = b0 + b1 * cos1 + b2 * cos2;
-                let num_im = b1 * sin1 + b2 * sin2;
-                let den_re = 1.0 + a1 * cos1 + a2 * cos2;
-                let den_im = a1 * sin1 + a2 * sin2;
-                let den = (den_re * den_re + den_im * den_im).sqrt();
-                if den > f64::EPSILON {
-                    magnitude *= (num_re * num_re + num_im * num_im).sqrt() / den;
-                }
-            }
-            peak = peak.max(magnitude);
-            freq *= ratio;
-        }
-        peak
     }
 
     /// Linear scalar applied before filtering to keep the cascade from clipping.

@@ -159,8 +159,18 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logError(`connect failed for channel ${channel.name}: ${message}`);
-      set({ status: 'error', errorMessage: message, isBuffering: false });
-      setWaveformActive(false);
+      // Rust now routes every ordinary startup failure - including a recoverable device
+      // issue - through a normal snapshot (see `handle_startup_failure` in commands.rs)
+      // rather than rejecting the invoke, so a thrown error here is an exceptional,
+      // non-playback-lifecycle failure (e.g. the IPC call itself failing). There is no
+      // revision to guard it with the way `applySnapshot` guards a real snapshot, so the
+      // best available check is channel identity: only apply this fallback error state if
+      // the user has not already moved on to a different channel while this call was in
+      // flight, so a slow/stale rejection can never clobber a newer selection's state.
+      if (get().currentChannel?.stream_id === channel.stream_id) {
+        set({ status: 'error', errorMessage: message, isBuffering: false });
+        setWaveformActive(false);
+      }
       throw err;
     }
   }

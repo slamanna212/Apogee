@@ -6,8 +6,8 @@ with no tester or device assigned; see `symphonia-platform-acceptance.md`.
 ## Before you start
 
 - `libasound2-dev` must be installed (build-time only; end users need just the runtime library).
-- MPV is still installed, still registered, and still works. Nothing has been removed. If the new
-  engine misbehaves, the old path is intact and every change is uncommitted.
+- MPV is no longer part of the application. Keep the working tree or a known-good build available
+  for comparison while completing the remaining hardware checks.
 - Run the app the way you normally do. Nothing here asks you to run a build command.
 
 ## What changed that you can feel

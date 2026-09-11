@@ -197,6 +197,63 @@ fn mp3_ts_decodes_independently_of_network_chunk_boundaries() {
     }
 }
 
+// ---------------------------------------------------------------------------------------
+// Finding 10: bitrate accounting must not mix frames counted under two different rates
+// into one seconds-estimate across a genuine mid-stream format change.
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn bitrate_accounting_resets_across_a_genuine_format_change() {
+    let mut pipeline = Pipeline::new();
+
+    // First format: 44100 Hz stereo MP3 (the existing `mp3.ts` fixture).
+    let mut ingest_a = TsIngest::new();
+    ingest_a.feed(&fixture("mp3.ts"));
+    ingest_a.finish();
+    while let Some(event) = ingest_a.poll() {
+        pipeline.accept(event).unwrap();
+    }
+    assert!(
+        pipeline.bitrate_kbps(44_100).is_some(),
+        "should already have enough evidence from the first format"
+    );
+
+    // Second format, decoded into the SAME pipeline: 22050 Hz mono MP3 at ~32 kbps (a
+    // fresh fixture generated specifically at a different rate, channel count AND
+    // bitrate, since the repository's other fixtures all happen to share one format).
+    // This models a live mid-stream re-encode or ABR switch landing a new
+    // `SourceEvent::Track` on an already-running pipeline.
+    //
+    // The bitrate is deliberately NOT simply half of the first format's ~128 kbps: at
+    // exactly half, contaminating the accounting with the old (44100 Hz, 128 kbps)
+    // frames exactly cancels out when mis-divided by the new 22050 Hz rate (mis-dividing
+    // doubles the apparent old duration, and doubling both the numerator's contribution
+    // and the denominator by the same old/new rate ratio only leaves the result
+    // unchanged when the bitrate ratio matches the rate ratio) - which would make this
+    // test pass whether or not the reset in `Pipeline::accept` actually runs. A 4x
+    // bitrate ratio against a 2x rate ratio has no such cancellation.
+    let mut ingest_b = TsIngest::new();
+    ingest_b.feed(&fixture("mp3-22050-mono.ts"));
+    ingest_b.finish();
+    while let Some(event) = ingest_b.poll() {
+        pipeline.accept(event).unwrap();
+    }
+
+    // If frames decoded under the old 44100 Hz format were still mixed into the running
+    // total, dividing the combined frame count by the NEW 22050 Hz rate would inflate the
+    // derived duration and push the apparent bitrate well above the genuine ~32 kbps
+    // content (see the arithmetic above) - a contaminated value lands far outside this
+    // window.
+    let kbps_after = pipeline
+        .bitrate_kbps(22_050)
+        .expect("enough evidence from the new-format fixture alone");
+    assert!(
+        (24..=42).contains(&kbps_after),
+        "bitrate {kbps_after} kbps looks contaminated by mixed-rate accounting carried \
+         over from before the format change"
+    );
+}
+
 #[test]
 fn samples_arriving_before_a_track_configuration_are_a_clear_error() {
     use apogee_playback_core::pipeline::PipelineError;

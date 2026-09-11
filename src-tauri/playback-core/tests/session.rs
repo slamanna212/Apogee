@@ -8,8 +8,8 @@ use apogee_playback_core::session::{
 #[test]
 fn switching_station_invalidates_the_previous_session() {
     let mut c = Controller::new();
-    let a = c.play("station-a");
-    let b = c.play("station-b");
+    let a = c.play("station-a", 0);
+    let b = c.play("station-b", 0);
     assert_ne!(a, b);
 
     // A's connection finally succeeds, far too late.
@@ -29,8 +29,8 @@ fn switching_station_invalidates_the_previous_session() {
 #[test]
 fn selecting_the_same_station_twice_creates_distinct_sessions() {
     let mut c = Controller::new();
-    let first = c.play("station-a");
-    let second = c.play("station-a");
+    let first = c.play("station-a", 0);
+    let second = c.play("station-a", 0);
     assert_ne!(
         first, second,
         "channel identity alone cannot distinguish sessions"
@@ -46,7 +46,7 @@ fn selecting_the_same_station_twice_creates_distinct_sessions() {
 fn stop_invalidates_work_in_flight_at_every_stage() {
     for stage in ["connect", "buffer", "retry"] {
         let mut c = Controller::new();
-        let g = c.play("station-a");
+        let g = c.play("station-a", 0);
         match stage {
             "buffer" => {
                 c.on_buffering(g, BufferingReason::FillingBuffer);
@@ -73,7 +73,7 @@ fn stop_invalidates_work_in_flight_at_every_stage() {
 #[test]
 fn a_stopped_controller_accepts_nothing_even_for_the_current_generation() {
     let mut c = Controller::new();
-    c.play("station-a");
+    c.play("station-a", 0);
     let g = c.stop();
     assert!(!c.accepts(g), "nothing may resume a stopped session");
 }
@@ -81,7 +81,7 @@ fn a_stopped_controller_accepts_nothing_even_for_the_current_generation() {
 #[test]
 fn revision_increases_monotonically_so_a_late_snapshot_cannot_win() {
     let mut c = Controller::new();
-    let g = c.play("station-a");
+    let g = c.play("station-a", 0);
     let early = c.snapshot();
     c.on_buffering(g, BufferingReason::FillingBuffer);
     c.on_audible(g, 0);
@@ -98,7 +98,7 @@ fn revision_increases_monotonically_so_a_late_snapshot_cannot_win() {
 #[test]
 fn every_observable_change_advances_the_revision() {
     let mut c = Controller::new();
-    let g = c.play("s");
+    let g = c.play("s", 0);
     let mut last = c.snapshot().revision;
     for step in 0..4 {
         match step {
@@ -124,7 +124,7 @@ fn every_observable_change_advances_the_revision() {
 #[test]
 fn transient_failures_retry_a_bounded_number_of_times() {
     let mut c = Controller::new();
-    let g = c.play("station-a");
+    let g = c.play("station-a", 0);
 
     // Slow failures: each attempt consumes real time, so the attempt count and the
     // wall-clock budget run out at roughly the same point.
@@ -155,7 +155,7 @@ fn transient_failures_retry_a_bounded_number_of_times() {
 #[test]
 fn permanent_failures_do_not_retry_at_all() {
     let mut c = Controller::new();
-    let g = c.play("station-a");
+    let g = c.play("station-a", 0);
     let next = c.on_error(g, ErrorClass::Permanent, "invalid credentials", 0);
     assert_eq!(
         next,
@@ -181,7 +181,7 @@ fn retry_attempts_alternate_the_url_extension() {
 #[test]
 fn the_retry_budget_refills_only_after_sustained_playback() {
     let mut c = Controller::new();
-    let g = c.play("station-a");
+    let g = c.play("station-a", 0);
 
     // Burn a retry, then play briefly and fail again. A short success must not refill.
     c.on_error(g, ErrorClass::Transient, "reset", 0);
@@ -210,7 +210,7 @@ fn a_flapping_stream_still_terminates() {
     // Connect, play briefly, drop; repeatedly. Must not retry forever. Brief playback does
     // not refill the budget, so both limits eventually run out.
     let mut c = Controller::new();
-    let g = c.play("station-a");
+    let g = c.play("station-a", 0);
     let mut now = 0u64;
     for _ in 0..200 {
         c.on_audible(g, now);
@@ -252,12 +252,12 @@ fn only_real_playback_counts_as_audible_for_scrobbling() {
 #[test]
 fn a_new_session_clears_the_previous_stations_metadata() {
     let mut c = Controller::new();
-    let a = c.play("station-a");
+    let a = c.play("station-a", 0);
     c.on_audible(a, 0);
     c.set_bitrate(a, Some(258));
     c.set_format(a, 44_100);
 
-    c.play("station-b");
+    c.play("station-b", 0);
     let snap = c.snapshot();
     assert_eq!(
         snap.bitrate_kbps, None,
@@ -274,8 +274,8 @@ fn a_new_session_clears_the_previous_stations_metadata() {
 fn the_selected_device_survives_a_station_change() {
     let mut c = Controller::new();
     c.set_device(Some("USB Audio".into()));
-    c.play("station-a");
-    c.play("station-b");
+    c.play("station-a", 0);
+    c.play("station-b", 0);
     c.stop();
     assert_eq!(
         c.snapshot().device.as_deref(),
@@ -291,7 +291,7 @@ fn an_instantly_failing_endpoint_still_gets_the_full_wall_clock_budget() {
     // seconds and gave up long before the stream could have come up. Measured against a
     // real backend: four attempts spanned 14:36:28 to 14:36:33.
     let mut c = Controller::new();
-    let g = c.play("station-a");
+    let g = c.play("station-a", 0);
 
     let mut now = 0u64;
     let mut retries = 0;
@@ -313,6 +313,43 @@ fn an_instantly_failing_endpoint_still_gets_the_full_wall_clock_budget() {
     assert!(
         retries as u32 > MAX_CONNECT_ATTEMPTS,
         "only {retries} retries when every failure was free"
+    );
+}
+
+#[test]
+fn connect_budget_is_measured_from_play_not_from_the_first_reported_failure() {
+    // A pathological first attempt that silently occupies the whole connect budget before
+    // ever producing an error (e.g. hanging right up to its own connect/read timeout). The
+    // wall-clock budget must already be considered spent from `play()`, not reset to a
+    // fresh window starting at whenever the first failure happens to be noticed - otherwise
+    // a slow-but-eventually-failing first attempt buys extra, unaccounted-for retry time.
+    let mut c = Controller::new();
+    let g = c.play("station-a", 0);
+
+    let mut now = CONNECT_BUDGET_MS; // the very first failure already exhausts the budget
+    let mut attempts = 0u32;
+    loop {
+        match c.on_error(g, ErrorClass::Transient, "slow", now) {
+            Some(Next::Retry { .. }) => {
+                attempts += 1;
+                now += 10; // every failure after the first is reported almost immediately
+            }
+            Some(Next::GiveUp) => {
+                attempts += 1;
+                break;
+            }
+            None => panic!("unexpected rejection"),
+        }
+        assert!(
+            attempts <= MAX_CONNECT_ATTEMPTS,
+            "retried past the attempt cap even though the budget was already spent at \
+             play() time - connect accounting was not started at the actual connect phase"
+        );
+    }
+    assert_eq!(
+        attempts, MAX_CONNECT_ATTEMPTS,
+        "should give up exactly at the attempt limit once the budget was already spent \
+         by play() time"
     );
 }
 
@@ -339,7 +376,7 @@ fn a_fast_failing_endpoint_is_not_hammered() {
     // Backoff has to keep the request count inside the budget modest, or restoring the
     // wall-clock window would just turn one bug into a different one.
     let mut c = Controller::new();
-    let g = c.play("station-a");
+    let g = c.play("station-a", 0);
     let mut now = 0u64;
     let mut requests = 0;
     while let Some(Next::Retry { delay_ms, .. }) =

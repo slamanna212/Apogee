@@ -1,6 +1,8 @@
 # Symphonia platform acceptance
 
-Created during M0. Updated after milestone scoping. No physical audio test has been run yet.
+Created during M0. Last implementation update: 2026-09-11. Linux physical playback was confirmed on
+2026-09-10; no new physical-device run was performed for the corrective buffering/control/device
+work, so the checks listed below remain pending.
 
 **Owner decision (2026-09-10):** the user has Linux hardware only. Windows, macOS Apple Silicon, and macOS Intel have no tester or device and are expected to stay PENDING MANUAL VALIDATION through M5. The user has chosen to proceed through the full plan, including MPV removal, with those three platforms unvalidated. That is an accepted, explicitly recorded release-readiness blocker, not a passed check. No release may be published on this basis without a further explicit decision.
 
@@ -30,6 +32,11 @@ bitrate accounting against a live stream rather than only fixtures. Stop and re-
 This satisfies the M3 checkpoint's audible-output requirement for Linux only. The remaining M3/M4
 manual checks (device hotplug, default-device following, long session, suspend/resume) are still
 outstanding, and Windows and macOS remain PENDING MANUAL VALIDATION with no tester or device.
+
+The 2026-09-11 corrective pass changed when queued PCM is consumed and controlled, and made device
+selection active. Recheck volume/mute response with a prefilled buffer, repeated starvation/refill,
+live device switching, unplug/replug, and changing the system default before release. Automated and
+silent-device tests do not count as those audible checks.
 
 Not a defect: one station (stream 1124, PopRocks) returns HTTP 503 from Dispatcharr. Plain `curl`
 reproduces the identical 503 with Apogee uninvolved, so that channel's upstream is unavailable rather

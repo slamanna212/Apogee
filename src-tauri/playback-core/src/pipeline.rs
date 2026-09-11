@@ -64,6 +64,12 @@ pub struct Pipeline {
     resets: u32,
     compressed_bytes: u64,
     decoded_frames: u64,
+    /// `(rate, channels)` of the most recently decoded block. Used only to detect a
+    /// genuine format change so `bitrate_kbps`'s accounting cannot mix `decoded_frames`
+    /// counted under two different rates into one seconds-estimate (finding 10). Distinct
+    /// from `resets`: a format change here does not by itself imply a decoder reset, and a
+    /// `SourceEvent::Discontinuity` does not by itself imply a format change.
+    last_format: Option<(u32, u16)>,
 }
 
 impl Pipeline {
@@ -123,6 +129,16 @@ impl Pipeline {
                     .ok_or(PipelineError::SamplesBeforeTrack)?;
                 let len = sample.data.len() as u64;
                 let block = decoder.decode(&sample).map_err(PipelineError::Decode)?;
+                let format = (block.rate, block.channels as u16);
+                if self.last_format.is_some_and(|prev| prev != format) {
+                    // A genuine format change: everything accumulated so far was counted
+                    // under a different rate, so folding this block's contribution into it
+                    // would derive `seconds` (and therefore bitrate) from a mixed-rate
+                    // frame count. Start fresh from this block instead of discarding it.
+                    self.compressed_bytes = 0;
+                    self.decoded_frames = 0;
+                }
+                self.last_format = Some(format);
                 self.compressed_bytes += len;
                 self.decoded_frames += (block.samples.len() / block.channels.max(1)) as u64;
                 Ok(Some(block))

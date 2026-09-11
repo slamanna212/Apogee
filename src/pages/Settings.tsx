@@ -134,6 +134,7 @@ export function Settings() {
 
   const [audioDevices, setAudioDevices] = useState<DeviceDescriptor[]>([]);
   const [loadingAudioDevices, setLoadingAudioDevices] = useState(false);
+  const [audioDeviceError, setAudioDeviceError] = useState<string | null>(null);
   const [equalizer, setEqualizerState] = useState<EqualizerSettings>(settings.equalizer);
   const [equalizerError, setEqualizerError] = useState<string | null>(null);
   const equalizerRef = useRef(equalizer);
@@ -210,15 +211,20 @@ export function Settings() {
   }
 
   async function handleAudioDeviceChange(value: string | null) {
+    setAudioDeviceError(null);
     if (!value) {
       await updateSettings({ audioDevice: null });
-      playerSetDevice(null).catch(() => {});
+      playerSetDevice(null).catch((err) => {
+        setAudioDeviceError(err instanceof Error ? err.message : String(err));
+      });
       return;
     }
     const device = audioDevices.find((d) => d.id === value);
     const selection = { id: value, name: device?.name ?? value };
     await updateSettings({ audioDevice: selection });
-    playerSetDevice(selection.id).catch(() => {});
+    playerSetDevice(selection.id).catch((err) => {
+      setAudioDeviceError(err instanceof Error ? err.message : String(err));
+    });
   }
 
   useEffect(() => {
@@ -352,6 +358,11 @@ export function Settings() {
           {deviceMigrationNotice && (
             <Alert color="yellow" title="Output device reset to system default" withCloseButton onClose={dismissDeviceMigrationNotice}>
               {deviceMigrationNotice}
+            </Alert>
+          )}
+          {audioDeviceError && (
+            <Alert color="red" title="Could not switch output device" withCloseButton onClose={() => setAudioDeviceError(null)}>
+              {audioDeviceError}
             </Alert>
           )}
           <Select

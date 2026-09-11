@@ -196,6 +196,53 @@ fn detect_playlist(b: &[u8]) -> Option<Detection> {
     Some(Detection::Identified(SourceKind::HlsMediaPlaylist))
 }
 
+/// True if `body` carries an `#EXT-X-KEY` tag anywhere. `hls-runtime`'s parser
+/// (`broadcast_hls::MediaPlaylist::parse`, confirmed 0.6.0) happily parses
+/// `EXT-X-KEY` as structured attribute data - it has no opinion on encryption
+/// policy at all, since this app builds it with decryption support compiled
+/// out. So every playlist body this app is about to hand to
+/// `HlsClient::on_playlist` must be checked here first, not only the very
+/// first one: a live origin can start unencrypted and add `EXT-X-KEY` to a
+/// later reload, or a master playlist's *variant* can carry it even when the
+/// master itself does not.
+#[must_use]
+pub fn is_encrypted_playlist(body: &[u8]) -> bool {
+    let body = strip_bom(body);
+    let trimmed = trim_ascii_start(body);
+    contains_tag(trimmed, b"#EXT-X-KEY")
+}
+
+/// Classifies a *complete* HLS playlist body - never a bounded probe prefix.
+///
+/// Recognizing the `#EXTM3U` header only establishes the container family;
+/// it does not establish the subtype (media vs master) or the encryption
+/// policy, because `#EXT-X-STREAM-INF`/`#EXT-X-KEY` are not required to
+/// appear near the top of the file (`detect_playlist`'s whole-buffer tag
+/// scan says as much). A caller that classifies from a bounded, possibly
+/// still-arriving prefix can reach a different answer than the same body
+/// classified whole - purely a function of where the network happened to
+/// split it into chunks. Callers MUST have already read the entire playlist
+/// body (under their own byte limit, deadline, and cancellation - see
+/// `playback::source::MAX_PROBED_PLAYLIST_BYTES`) before calling this, and
+/// must trust only this answer, not whatever `Detector` returned on the
+/// bounded prefix that first recognized the header.
+///
+/// # Errors
+/// [`Unsupported::EncryptedPlaylist`] if any `#EXT-X-KEY` is present.
+/// [`Unsupported::UnknownFormat`] if `body` does not actually start with
+/// `#EXTM3U` once BOM/whitespace are stripped - defensive: every caller
+/// only reaches this after already recognizing that header on a prefix of
+/// the same bytes, so this should not happen in practice.
+pub fn classify_complete_hls_playlist(body: &[u8]) -> Result<SourceKind, Unsupported> {
+    let stripped = strip_bom(body);
+    let trimmed = trim_ascii_start(stripped);
+    match detect_playlist(trimmed) {
+        Some(Detection::Identified(kind)) => Ok(kind),
+        Some(Detection::Unsupported(unsupported)) => Err(unsupported),
+        _ => Err(Unsupported::UnknownFormat),
+    }
+}
+
 fn contains_tag(haystack: &[u8], tag: &[u8]) -> bool {
     haystack
         .windows(tag.len())
