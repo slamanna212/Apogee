@@ -6,6 +6,8 @@ import { DEFAULT_EQUALIZER, normalizeEqualizerSettings, type EqualizerSettings }
 import { migrateDevice, setDevice, setBuffering } from '../lib/playerClient';
 
 export type UpdateChannel = 'stable' | 'beta';
+export type StartupPage = 'home' | 'channels' | 'favorites' | 'recent' | 'alerts';
+export type HomePageSize = 'small' | 'standard' | 'expanded';
 
 export interface ScrobblingSettings {
   lastfm: {
@@ -47,6 +49,9 @@ export interface Settings {
   categoryNames: string[];
   volume: number;
   updateChannel: UpdateChannel;
+  checkUpdatesOnStartup: boolean;
+  startupPage: StartupPage;
+  homePageSize: HomePageSize;
   keepMiniWindowOnTop: boolean;
   onboardingComplete: boolean;
   onboardingStep: number;
@@ -67,6 +72,9 @@ export const DEFAULT_SETTINGS: Settings = {
   categoryNames: [],
   volume: 80,
   updateChannel: 'stable',
+  checkUpdatesOnStartup: true,
+  startupPage: 'home',
+  homePageSize: 'standard',
   keepMiniWindowOnTop: true,
   onboardingComplete: false,
   onboardingStep: 0,
@@ -180,6 +188,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       settings: {
         ...DEFAULT_SETTINGS,
         ...(stored as Partial<PersistedSettings>),
+        startupPage: ['home', 'channels', 'favorites', 'recent', 'alerts'].includes(stored.startupPage as string)
+          ? stored.startupPage as StartupPage : DEFAULT_SETTINGS.startupPage,
+        homePageSize: ['small', 'standard', 'expanded'].includes(stored.homePageSize as string)
+          ? stored.homePageSize as HomePageSize : DEFAULT_SETTINGS.homePageSize,
+        checkUpdatesOnStartup: typeof stored.checkUpdatesOnStartup === 'boolean'
+          ? stored.checkUpdatesOnStartup : DEFAULT_SETTINGS.checkUpdatesOnStartup,
         categoryIds: migratedCategoryIds,
         categoryNames: migratedCategoryNames,
         volume: typeof stored.volume === 'number' ? stored.volume : (legacyDefaultVolume ?? DEFAULT_SETTINGS.volume),

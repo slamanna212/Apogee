@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Button, Group, Text } from '@mantine/core';
+import { Button, Group, Switch, Text } from '@mantine/core';
 import { OptionRow } from './OptionRow';
 import { useSettingsStore, type UpdateChannel } from '../../stores/settingsStore';
 import { useUpdateStore } from '../../stores/updateStore';
@@ -12,6 +12,7 @@ const UPDATE_CHANNEL_OPTIONS: { value: UpdateChannel; label: string }[] = [
 
 export const UpdatesPanel = forwardRef<SettingsResetHandle, SettingsPanelProps>(function UpdatesPanel({ onSaved }, ref) {
   const updateChannel = useSettingsStore((s) => s.settings.updateChannel);
+  const checkUpdatesOnStartup = useSettingsStore((s) => s.settings.checkUpdatesOnStartup);
   const updateSettings = useSettingsStore((s) => s.update);
   const updateStatus = useUpdateStore((s) => s.status);
   const checkForUpdates = useUpdateStore((s) => s.checkForUpdates);
@@ -19,7 +20,7 @@ export const UpdatesPanel = forwardRef<SettingsResetHandle, SettingsPanelProps>(
 
   useImperativeHandle(ref, () => ({
     async reset() {
-      await updateSettings({ updateChannel: 'stable' });
+      await updateSettings({ updateChannel: 'stable', checkUpdatesOnStartup: true });
     },
   }));
 
@@ -42,6 +43,15 @@ export const UpdatesPanel = forwardRef<SettingsResetHandle, SettingsPanelProps>(
           }}
         />
       </div>
+      <Switch
+        label="Check for updates on startup"
+        description="Automatically check for new versions when Apogee opens"
+        checked={checkUpdatesOnStartup}
+        onChange={(e) => {
+          void updateSettings({ checkUpdatesOnStartup: e.currentTarget.checked });
+          onSaved();
+        }}
+      />
       <Group align="center">
         <Button onClick={handleCheckForUpdates} loading={updateStatus === 'checking'}>
           Check for updates

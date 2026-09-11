@@ -227,6 +227,12 @@ function AppContent() {
   const [browserOpen, setBrowserOpen] = useState(true);
   const [barMode, setBarMode] = useState<BarMode>('expanded');
   const [page, setPage] = useState<Page>('home');
+  const startupPageApplied = useRef(false);
+  useEffect(() => {
+    if (!settingsLoaded || startupPageApplied.current) return;
+    startupPageApplied.current = true;
+    setPage(settings.startupPage);
+  }, [settingsLoaded, settings.startupPage]);
   const [modalStreamId, setModalStreamId] = useState<number | null>(null);
   const [compact, setCompact] = useState(false);
 
@@ -347,13 +353,12 @@ function AppContent() {
   }, [settingsLoaded, settings.discordRpcEnabled]);
 
   useEffect(() => {
-    if (!settingsLoaded) return;
+    if (!settingsLoaded || !settings.checkUpdatesOnStartup) return;
     const timer = setTimeout(() => {
       void useUpdateStore.getState().checkForUpdates(settings.updateChannel);
     }, 5000);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settingsLoaded]);
+  }, [settingsLoaded, settings.checkUpdatesOnStartup, settings.updateChannel]);
 
   useEffect(() => {
     if (settingsLoaded && settings.baseUrl && settings.username && settings.categoryIds.length > 0) {

@@ -7,6 +7,12 @@ export const FAVORITE_BONUS = 3;
 export const MAX_ROWS = 6;
 export const CHANNELS_PER_ROW = 8;
 
+export const HOME_PAGE_SIZES = {
+  small: { maxRows: 3, channelsPerRow: 6, recentCount: 6 },
+  standard: { maxRows: MAX_ROWS, channelsPerRow: CHANNELS_PER_ROW, recentCount: 10 },
+  expanded: { maxRows: 10, channelsPerRow: 12, recentCount: 15 },
+} as const;
+
 export interface RecommendationRow {
   genre: string;
   channels: XtreamChannel[];
@@ -70,6 +76,7 @@ export function buildRecommendationRows(
   channelMetadata: Map<number, StellarChannel>,
   recentlyPlayed: number[],
   maxRows: number = MAX_ROWS,
+  channelsPerRow: number = CHANNELS_PER_ROW,
 ): RecommendationRow[] {
   const recentIds = new Set(recentlyPlayed);
   const used = new Set<string>();
@@ -87,7 +94,7 @@ export function buildRecommendationRows(
     used.add(genre);
     const matched = channelsFor(genre);
     if (matched.length > 0) {
-      rows.push({ genre, channels: matched.slice(0, CHANNELS_PER_ROW), personalized: true });
+      rows.push({ genre, channels: matched.slice(0, channelsPerRow), personalized: true });
     }
   }
 
@@ -97,7 +104,7 @@ export function buildRecommendationRows(
     used.add(genre);
     const matched = channelsFor(genre);
     if (matched.length > 0) {
-      rows.push({ genre, channels: matched.slice(0, CHANNELS_PER_ROW), personalized: false });
+      rows.push({ genre, channels: matched.slice(0, channelsPerRow), personalized: false });
     }
   }
 
