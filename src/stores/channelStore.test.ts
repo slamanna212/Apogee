@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { XtreamChannel } from '../types/xtream';
 import type { XtreamCredentials } from '../lib/xtream';
 import { getLiveStreams } from '../lib/xtream';
-import { useChannelStore } from './channelStore';
+import { nextPollDelayMs, useChannelStore } from './channelStore';
+import { getNowPlaying } from '../lib/stellarTunerLog';
+import type { StellarNowPlayingResponse, StellarStation } from '../types/stellarTunerLog';
+
+vi.mock('@tauri-apps/plugin-log', () => ({ warn: vi.fn(async () => {}) }));
 
 vi.mock('../lib/xtream', () => ({
   getLiveStreams: vi.fn(),
@@ -31,7 +35,51 @@ function channel(streamId: number, num: number): XtreamChannel {
 
 beforeEach(() => {
   vi.mocked(getLiveStreams).mockReset();
-  useChannelStore.setState({ channels: [], status: 'idle', error: null });
+  vi.mocked(getNowPlaying).mockReset();
+  useChannelStore.setState({ channels: [], status: 'idle', error: null, nowPlaying: new Map(), pollFailureCount: 0 });
+});
+
+describe('now-playing polling', () => {
+  function response(title: string): StellarNowPlayingResponse {
+    const station: StellarStation = {
+      id: 'poll-test', name: 'Channel 1', channel_number: 1, artist: 'Artist',
+      title, album: 'Album', cut_type: 'Song', artwork_url: 'cover.png', itunes_id: '',
+    };
+    return { stations: { station }, station_count: 1, updated_utc: '', poll_interval_seconds: 10 };
+  }
+
+  it('accounts for request duration and bounds recovery delays', () => {
+    expect(nextPollDelayMs(0, 4000)).toBe(6000);
+    expect(nextPollDelayMs(0, 12000)).toBe(1000);
+    expect([1, 2, 3, 10].map((failures) => nextPollDelayMs(failures))).toEqual([10000, 20000, 30000, 30000]);
+  });
+
+  it('keeps metadata on failure and resets backoff after recovery', async () => {
+    useChannelStore.setState({ channels: [channel(1, 1)] });
+    vi.mocked(getNowPlaying).mockResolvedValueOnce(response('Song'));
+    await useChannelStore.getState().pollNowPlaying();
+    const previous = useChannelStore.getState().nowPlaying;
+    vi.mocked(getNowPlaying).mockRejectedValueOnce(new Error('offline'));
+    await useChannelStore.getState().pollNowPlaying();
+    expect(useChannelStore.getState().nowPlaying).toBe(previous);
+    expect(useChannelStore.getState().pollFailureCount).toBe(1);
+    vi.mocked(getNowPlaying).mockResolvedValueOnce(response('Next'));
+    await useChannelStore.getState().pollNowPlaying();
+    expect(useChannelStore.getState().pollFailureCount).toBe(0);
+    expect(useChannelStore.getState().nowPlaying.get(1)?.title).toBe('Next');
+  });
+
+  it('ignores an older request completing after a newer poll', async () => {
+    useChannelStore.setState({ channels: [channel(1, 1)] });
+    let resolve!: (value: StellarNowPlayingResponse) => void;
+    vi.mocked(getNowPlaying).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    const oldPoll = useChannelStore.getState().pollNowPlaying();
+    vi.mocked(getNowPlaying).mockResolvedValueOnce(response('New'));
+    await useChannelStore.getState().pollNowPlaying();
+    resolve(response('Old'));
+    await oldPoll;
+    expect(useChannelStore.getState().nowPlaying.get(1)?.title).toBe('New');
+  });
 });
 
 describe('channelStore.fetchChannels', () => {

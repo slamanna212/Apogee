@@ -368,11 +368,12 @@ function AppContent() {
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     async function tick() {
+      const startedAt = performance.now();
       await pollNowPlaying(stellarApiKey);
       if (cancelled) return;
       // Reschedule using the failure count pollNowPlaying just updated, so a
       // StellarTunerLog outage backs off instead of polling at a fixed rate.
-      const delay = nextPollDelayMs(useChannelStore.getState().pollFailureCount);
+      const delay = nextPollDelayMs(useChannelStore.getState().pollFailureCount, performance.now() - startedAt);
       timer = setTimeout(tick, delay);
     }
 

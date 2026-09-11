@@ -211,6 +211,29 @@ describe('nowPlayingMapsEqual', () => {
   });
 });
 
+describe('artwork continuity', () => {
+  const previous = station();
+  const build = (update: Partial<StellarStation>) => buildNowPlayingMap(
+    [channel(1, 'Octane')], [station(update)], new Map(), new Map([[1, previous]]),
+  ).get(1);
+
+  it('keeps the same track cover through a partial metadata update', () => {
+    expect(build({ artwork_url: '' })).toBe(previous);
+    expect(build({ artwork_url: '  ' })).toBe(previous);
+  });
+
+  it.each([
+    { title: 'Next song' }, { artist: 'Other artist' }, { album: 'Other album' },
+    { cut_type: 'Talk' }, { id: 'other-station' },
+  ])('does not carry a cover across a track or station change: %j', (update) => {
+    expect(build({ ...update, artwork_url: '' })?.artwork_url).toBe('');
+  });
+
+  it('accepts a newly supplied cover for the same track', () => {
+    expect(build({ artwork_url: 'new.png' })?.artwork_url).toBe('new.png');
+  });
+});
+
 describe('buildChannelMetadataMap', () => {
   it('matches on marketing_name when present, falling back to name', () => {
     const byMarketing = stellarChannel({ id: 'a', name: 'internal-a', marketing_name: 'Octane' });

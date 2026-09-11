@@ -369,6 +369,14 @@ export function buildNowPlayingMap(
       stationIdCache.set(channel.stream_id, match.id);
     }
     const previous = prev?.get(channel.stream_id);
+    // Metadata and cover art can arrive on different polls. Keep a known cover
+    // only while the station and track still match; never carry it into a new song.
+    if (previous && previous.id === station.id &&
+        previous.artist === station.artist && previous.title === station.title &&
+        previous.album === station.album && previous.cut_type === station.cut_type &&
+        station.title.trim() && !station.artwork_url?.trim() && previous.artwork_url) {
+      station = { ...station, artwork_url: previous.artwork_url };
+    }
     map.set(channel.stream_id, previous && stationRenderEqual(previous, station) ? previous : station);
   }
   return map;
