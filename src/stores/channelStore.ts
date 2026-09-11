@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { warn as logWarn } from '@tauri-apps/plugin-log';
+import { debug as logDebug, warn as logWarn } from '@tauri-apps/plugin-log';
 import { load, type Store } from '@tauri-apps/plugin-store';
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel, StellarStation } from '../types/stellarTunerLog';
@@ -102,10 +102,12 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
       const { channels, nowPlaying } = get();
       const stations = Object.values(response.stations);
       const next = buildNowPlayingMap(channels, stations, stationIdCache, nowPlaying);
+      const changed = !nowPlayingMapsEqual(nowPlaying, next);
       set({
-        nowPlaying: nowPlayingMapsEqual(nowPlaying, next) ? nowPlaying : next,
+        nowPlaying: changed ? next : nowPlaying,
         pollFailureCount: 0,
       });
+      void logDebug(`Stellar now-playing applied: updated_utc=${response.updated_utc}; stations=${stations.length}; provider_channels=${channels.length}; matched_channels=${next.size}; changed=${changed}`).catch(() => {});
     } catch (err) {
       if (revision !== pollRevision) return;
       // transient poll failure - keep showing the last known now-playing data,

@@ -320,6 +320,56 @@ pub async fn cancellable_sleep(
     }
 }
 
+/// Only diagnostic response fields: never dump cookies, authorization, or whole headers.
+fn stellar_response_headers(
+    headers: &reqwest::header::HeaderMap,
+    request_headers: &[(&str, &str)],
+) -> String {
+    [
+        "cf-ray",
+        "server",
+        "date",
+        "content-type",
+        "content-length",
+        "content-encoding",
+        "cf-cache-status",
+        "age",
+        "retry-after",
+        "ratelimit-limit",
+        "ratelimit-remaining",
+        "ratelimit-reset",
+        "x-ratelimit-limit",
+        "x-ratelimit-remaining",
+        "x-ratelimit-reset",
+        "cf-error-type",
+        "cf-error-origin",
+    ]
+    .iter()
+    .filter_map(|name| {
+        let value = headers.get(*name)?.to_str().ok()?;
+        Some(format!(
+            "{name}={}",
+            diagnostic_text(value, request_headers)
+        ))
+    })
+    .collect::<Vec<_>>()
+    .join("; ")
+}
+
+fn diagnostic_text(text: &str, request_headers: &[(&str, &str)]) -> String {
+    let mut safe = text.to_owned();
+    for (name, value) in request_headers {
+        if name.eq_ignore_ascii_case("x-api-key") && !value.is_empty() {
+            safe = safe.replace(value, "[redacted]");
+        }
+    }
+    redact_text(&safe)
+        .chars()
+        .take(512)
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
+}
+
 // ---------------------------------------------------------------------
 // Client construction
 // ---------------------------------------------------------------------
@@ -536,6 +586,19 @@ impl NetworkService {
         cancel: &CancellationToken,
     ) -> Result<FetchedBody, NetworkError> {
         let parsed = parse_allowed_url(url)?;
+        // Diagnose this API without exposing provider URLs or arbitrary request headers.
+        let stellar = parsed.host_str() == Some("api.stellartunerlog.com");
+        static REQUEST_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let request_id = REQUEST_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let started = std::time::Instant::now();
+        if stellar {
+            log::debug!(
+                "stellar HTTP request id={request_id}: method=GET endpoint={}://{}{} query_present={} user_agent={USER_AGENT} api_key_present={}",
+                parsed.scheme(), parsed.host_str().unwrap_or(""), parsed.path(),
+                parsed.query().is_some(),
+                headers.iter().any(|(name, value)| name.eq_ignore_ascii_case("x-api-key") && !value.is_empty()),
+            );
+        }
         let mut request = self.json_api.get(parsed);
         for (name, value) in headers {
             request = request.header(*name, *value);
@@ -543,9 +606,43 @@ impl NetworkService {
         let response = tokio::select! {
             biased;
             () = cancel.cancelled() => return Err(NetworkError::Cancelled),
-            result = request.send() => result.map_err(transport_error)?,
+            result = request.send() => result.map_err(transport_error),
         };
-        read_bounded(response, self.json_api_max_body_bytes, cancel).await
+        let response = response.map_err(|error| {
+            if stellar {
+                log::debug!(
+                    "stellar HTTP transport failure id={request_id}: elapsed_ms={} error={}",
+                    started.elapsed().as_millis(),
+                    diagnostic_text(&error.to_string(), headers)
+                );
+            }
+            error
+        })?;
+        if stellar {
+            log::debug!(
+                "stellar HTTP response id={request_id}: status={} protocol={:?} headers_ms={} final_origin={} final_path={} headers={}",
+                response.status().as_u16(), response.version(), started.elapsed().as_millis(),
+                redact_url(response.url()),
+                if response.url().host_str() == Some("api.stellartunerlog.com") { response.url().path() } else { "[redacted]" },
+                stellar_response_headers(response.headers(), headers),
+            );
+        }
+        let result = read_bounded(response, self.json_api_max_body_bytes, cancel).await;
+        if stellar {
+            match &result {
+                Ok(body) => log::debug!(
+                    "stellar HTTP complete id={request_id}: elapsed_ms={} body_bytes={}",
+                    started.elapsed().as_millis(),
+                    body.bytes.len()
+                ),
+                Err(error) => log::debug!(
+                    "stellar HTTP failed id={request_id}: elapsed_ms={} error={}",
+                    started.elapsed().as_millis(),
+                    diagnostic_text(&error.to_string(), headers)
+                ),
+            }
+        }
+        result
     }
 
     /// Artwork profile: finite deadline, byte limit. Content *validation*
@@ -812,6 +909,41 @@ mod tests {
     use std::time::Instant;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
+
+    #[test]
+    fn stellar_diagnostics_allowlist_headers_and_redact_echoed_keys() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("cf-ray", "test-ray-IAD".parse().unwrap());
+        headers.insert("server", "cloudflare".parse().unwrap());
+        headers.insert("retry-after", "30".parse().unwrap());
+        headers.insert("set-cookie", "private-cookie".parse().unwrap());
+        headers.insert("x-api-key", "private-key".parse().unwrap());
+        headers.insert("cf-error-type", "echo private-key".parse().unwrap());
+        let output = stellar_response_headers(&headers, &[("X-API-Key", "private-key")]);
+        assert!(output.contains("cf-ray=test-ray-IAD"));
+        assert!(output.contains("server=cloudflare"));
+        assert!(output.contains("retry-after=30"));
+        assert!(output.contains("echo [redacted]"));
+        assert!(!output.contains("private-key"));
+        assert!(!output.contains("private-cookie"));
+        assert!(!output.contains("set-cookie"));
+    }
+
+    #[test]
+    fn stellar_diagnostic_errors_are_bounded_and_cannot_inject_log_lines() {
+        let output = diagnostic_text(
+            &format!(
+                "key=private-key\nhttps://example.com/private/path?token=secret {}",
+                "x".repeat(1000)
+            ),
+            &[("x-api-key", "private-key")],
+        );
+        assert!(output.chars().count() <= 512);
+        assert!(!output.contains("private-key"));
+        assert!(!output.contains("/private/path"));
+        assert!(!output.contains("token=secret"));
+        assert!(!output.contains('\n'));
+    }
 
     // -----------------------------------------------------------------
     // Pure unit tests: redaction, scheme/URL validation

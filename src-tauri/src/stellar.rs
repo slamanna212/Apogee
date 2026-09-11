@@ -50,15 +50,23 @@ async fn get_json(
         _ => Vec::new(),
     };
     log::debug!(
-        "stellar {endpoint} request: api_key_present={}",
-        !headers.is_empty()
+        "stellar {endpoint} request: api_key_present={} builtin_key_present={} supplied_matches_builtin={} key_has_outer_whitespace={} key_header_valid={}",
+        !headers.is_empty(),
+        option_env!("STELLAR_API_KEY").is_some_and(|key| !key.is_empty()),
+        api_key.filter(|key| !key.is_empty()).is_some_and(|key| Some(key) == option_env!("STELLAR_API_KEY")),
+        api_key.is_some_and(|key| key != key.trim()),
+        api_key.is_none_or(|key| reqwest::header::HeaderValue::from_str(key).is_ok()),
     );
     let body = network
         .fetch_json_with_headers(url, &headers, &cancel)
         .await
         .map_err(|e| {
-            log::warn!("stellar {endpoint} request failed: {e}");
-            describe(endpoint, &e)
+            let mut message = describe(endpoint, &e);
+            if let Some(key) = api_key.filter(|key| !key.is_empty()) {
+                message = message.replace(key, "[redacted]");
+            }
+            log::warn!("{message}");
+            message
         })?;
     let value: Value = serde_json::from_slice(&body.bytes)
         .map_err(|_| format!("StellarTunerLog {endpoint} returned invalid JSON"))?;

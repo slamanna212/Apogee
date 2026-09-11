@@ -6,7 +6,10 @@ import { nextPollDelayMs, useChannelStore } from './channelStore';
 import { getNowPlaying } from '../lib/stellarTunerLog';
 import type { StellarNowPlayingResponse, StellarStation } from '../types/stellarTunerLog';
 
-vi.mock('@tauri-apps/plugin-log', () => ({ warn: vi.fn(async () => {}) }));
+vi.mock('@tauri-apps/plugin-log', () => ({
+  warn: vi.fn(async () => {}),
+  debug: vi.fn(async () => {}),
+}));
 
 vi.mock('../lib/xtream', () => ({
   getLiveStreams: vi.fn(),
