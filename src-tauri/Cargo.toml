@@ -41,7 +41,7 @@ tokio = { version = "=1.53.0", features = ["process", "net", "io-util", "rt", "t
 souvlaki = "=0.8.3"
 discord-rich-presence = "=1.1.0"
 url = "=2.5.8"
-time = { version = "=0.3.54", features = ["parsing", "formatting"] }
+time = { version = "=0.3.55", features = ["parsing", "formatting"] }
 reqwest = { version = "=0.12.28", default-features = false, features = ["json", "rustls-tls", "stream"] }
 md5 = "=0.8.1"
 apogee-playback-core = { path = "playback-core" }
