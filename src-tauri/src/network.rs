@@ -64,6 +64,24 @@ const USER_AGENT: &str = concat!("Apogee/", env!("CARGO_PKG_VERSION"));
 /// restriction below.
 const MAX_REDIRECTS: usize = 10;
 
+fn family_name(family: u8) -> &'static str {
+    match family {
+        1 => "IPv4",
+        2 => "IPv6",
+        _ => "automatic IP selection",
+    }
+}
+
+fn stellar_retryable(error: &NetworkError) -> bool {
+    match error {
+        NetworkError::Transport(_) | NetworkError::ResponseTimedOut | NetworkError::Stalled => true,
+        NetworkError::Status { status, .. } => {
+            status.is_server_error() || *status == StatusCode::REQUEST_TIMEOUT
+        }
+        _ => false,
+    }
+}
+
 // ---------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------
@@ -462,6 +480,8 @@ impl Default for NetworkServiceConfig {
 #[derive(Clone)]
 pub struct NetworkService {
     json_api: Client,
+    stellar_clients: [Client; 3],
+    stellar_family: Arc<std::sync::atomic::AtomicU8>,
     json_api_max_body_bytes: usize,
     artwork: Client,
     artwork_max_body_bytes: usize,
@@ -539,6 +559,22 @@ impl NetworkService {
 
     pub fn with_config(config: NetworkServiceConfig) -> Result<Self, NetworkError> {
         let json_api = build_client(base_builder().timeout(config.json_api_timeout))?;
+        // Bound a broken family's entire attempt (including TLS/body stalls),
+        // then try the other family. Other JSON APIs retain their own budget.
+        let stellar_timeout = config.json_api_timeout.min(Duration::from_secs(5));
+        let stellar_clients = [
+            build_client(base_builder().timeout(stellar_timeout))?,
+            build_client(
+                base_builder()
+                    .timeout(stellar_timeout)
+                    .local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)),
+            )?,
+            build_client(
+                base_builder()
+                    .timeout(stellar_timeout)
+                    .local_address(std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED)),
+            )?,
+        ];
         let artwork = build_client(base_builder().timeout(config.artwork_timeout))?;
         // No `.timeout()` call for this client - see module docs. Only the
         // connect phase gets a deadline; the running body is governed by
@@ -550,6 +586,8 @@ impl NetworkService {
 
         Ok(Self {
             json_api,
+            stellar_clients,
+            stellar_family: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             json_api_max_body_bytes: config.json_api_max_body_bytes,
             artwork,
             artwork_max_body_bytes: config.artwork_max_body_bytes,
@@ -589,6 +627,88 @@ impl NetworkService {
         cancel: &CancellationToken,
     ) -> Result<FetchedBody, NetworkError> {
         let parsed = parse_allowed_url(url)?;
+        if parsed.host_str() == Some("api.stellartunerlog.com") {
+            return self.fetch_stellar_json(parsed, headers, cancel).await;
+        }
+        self.fetch_json_once(&self.json_api, parsed, headers, cancel, &mut None)
+            .await
+    }
+
+    async fn fetch_stellar_json(
+        &self,
+        parsed: Url,
+        headers: &[(&str, &str)],
+        cancel: &CancellationToken,
+    ) -> Result<FetchedBody, NetworkError> {
+        use std::sync::atomic::Ordering;
+        // 0 = OS selection, 1 = IPv4, 2 = IPv6. Clones share the last
+        // successful family so a broken path isn't retried on every poll.
+        let mut family = self.stellar_family.load(Ordering::Relaxed);
+        let mut tried = [false; 3];
+        loop {
+            if cancel.is_cancelled() {
+                return Err(NetworkError::Cancelled);
+            }
+            tried[family as usize] = true;
+            let mut peer_family = None;
+            let result = self
+                .fetch_json_once(
+                    &self.stellar_clients[family as usize],
+                    parsed.clone(),
+                    headers,
+                    cancel,
+                    &mut peer_family,
+                )
+                .await;
+            match result {
+                Ok(body) => {
+                    let working = if family == 0 {
+                        peer_family.unwrap_or(0)
+                    } else {
+                        family
+                    };
+                    let previous = self.stellar_family.swap(working, Ordering::Relaxed);
+                    if previous != working {
+                        log::info!(
+                            "stellar network selected {} after successful response",
+                            family_name(working)
+                        );
+                    }
+                    return Ok(body);
+                }
+                Err(error) => {
+                    if !stellar_retryable(&error) {
+                        return Err(error);
+                    }
+                    // If automatic selection reached a server, don't repeat the
+                    // same failed family. Before headers, its family is unknown.
+                    if family == 0 {
+                        if let Some(peer) = peer_family {
+                            tried[peer as usize] = true;
+                        }
+                    }
+                    let Some(next) = (1..=2).find(|next| !tried[*next as usize]) else {
+                        return Err(error);
+                    };
+                    log::warn!(
+                        "stellar network {} failed; retrying {}",
+                        family_name(family),
+                        family_name(next)
+                    );
+                    family = next;
+                }
+            }
+        }
+    }
+
+    async fn fetch_json_once(
+        &self,
+        client: &Client,
+        parsed: Url,
+        headers: &[(&str, &str)],
+        cancel: &CancellationToken,
+        peer_family: &mut Option<u8>,
+    ) -> Result<FetchedBody, NetworkError> {
         // Diagnose this API without exposing provider URLs or arbitrary request headers.
         let stellar = parsed.host_str() == Some("api.stellartunerlog.com");
         static REQUEST_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -602,7 +722,7 @@ impl NetworkService {
                 headers.iter().any(|(name, value)| name.eq_ignore_ascii_case("x-api-key") && !value.is_empty()),
             );
         }
-        let mut request = self.json_api.get(parsed);
+        let mut request = client.get(parsed);
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
@@ -621,6 +741,9 @@ impl NetworkService {
             }
             error
         })?;
+        *peer_family = response
+            .remote_addr()
+            .map(|addr| if addr.is_ipv4() { 1 } else { 2 });
         if stellar {
             log::debug!(
                 "stellar HTTP response id={request_id}: status={} protocol={:?} headers_ms={} remote_addr={:?} final_origin={} final_path={} headers={}",
@@ -1072,6 +1195,117 @@ mod tests {
 
     fn base_url(addr: SocketAddr, path: &str) -> String {
         format!("http://{addr}{path}")
+    }
+
+    // Controlled proxy endpoints let both family paths run even on a CI host
+    // without IPv6. Production clients bind to their respective IP families.
+    fn stellar_test_client(addr: SocketAddr) -> Client {
+        base_builder()
+            .proxy(reqwest::Proxy::all(format!("http://{addr}")).unwrap())
+            .timeout(Duration::from_millis(150))
+            .build()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn stellar_falls_back_both_ways_and_remembers_the_working_family() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        for (failed_family, working_family) in [(1, 2), (2, 1)] {
+            let failures = Arc::new(AtomicUsize::new(0));
+            let counter = failures.clone();
+            let (bad, bad_server) = spawn_server(move |mut stream: TcpStream| {
+                counter.fetch_add(1, Ordering::Relaxed);
+                async move {
+                    stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 16\r\nConnection: close\r\n\r\nerror code: 1102").await.unwrap();
+                }
+            });
+            let (good, good_server) = spawn_server(|mut stream: TcpStream| async move {
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                    )
+                    .await
+                    .unwrap();
+            });
+            let mut service = NetworkService::new().unwrap();
+            service.stellar_clients[failed_family] = stellar_test_client(bad);
+            service.stellar_clients[working_family] = stellar_test_client(good);
+            service
+                .stellar_family
+                .store(failed_family as u8, Ordering::Relaxed);
+            for _ in 0..2 {
+                let result = service
+                    .fetch_json_with_headers(
+                        "http://api.stellartunerlog.com/v1/nowplaying",
+                        &[],
+                        &CancellationToken::new(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(result.bytes, b"{}");
+            }
+            assert_eq!(
+                failures.load(Ordering::Relaxed),
+                1,
+                "must not retry the broken family on the next poll"
+            );
+            assert_eq!(
+                service.clone().stellar_family.load(Ordering::Relaxed),
+                working_family as u8
+            );
+            bad_server.abort();
+            good_server.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn stellar_recovers_from_stalled_headers() {
+        use std::sync::atomic::Ordering;
+        let (bad, bad_server) = spawn_server(|_stream: TcpStream| async move {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            drop(_stream);
+        });
+        let (good, good_server) = spawn_server(|mut stream: TcpStream| async move {
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+                .await
+                .unwrap();
+        });
+        let mut service = NetworkService::new().unwrap();
+        service.stellar_clients[2] = stellar_test_client(bad);
+        service.stellar_clients[1] = stellar_test_client(good);
+        service.stellar_family.store(2, Ordering::Relaxed);
+        let started = Instant::now();
+        service
+            .fetch_stellar_json(
+                Url::parse("http://stellar.test/").unwrap(),
+                &[],
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_eq!(service.stellar_family.load(Ordering::Relaxed), 1);
+        bad_server.abort();
+        good_server.abort();
+    }
+
+    #[test]
+    fn stellar_does_not_retry_auth_rate_limits_cancellation_or_body_limits() {
+        for status in [
+            StatusCode::UNAUTHORIZED,
+            StatusCode::FORBIDDEN,
+            StatusCode::TOO_MANY_REQUESTS,
+        ] {
+            assert!(!stellar_retryable(&NetworkError::Status {
+                status,
+                detail: None
+            }));
+        }
+        assert!(!stellar_retryable(&NetworkError::Cancelled));
+        assert!(!stellar_retryable(&NetworkError::BodyTooLarge {
+            limit: 10
+        }));
     }
 
     // -----------------------------------------------------------------
