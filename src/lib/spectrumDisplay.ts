@@ -5,11 +5,17 @@ export function spectrumDisplayLevels(levels: readonly number[], bands: number):
 
   const clean = levels.map((level) => Number.isFinite(level) ? Math.max(0, Math.min(1, level)) : 0);
   const mean = clean.reduce((sum, level) => sum + level, 0) / clean.length;
+  // Loud, dense passages need headroom for their differences to remain visible.
+  // Keep quieter passages level-sensitive, but limit the display's center.
+  const center = Math.min(mean, 0.55);
   const shaped = clean.map((level) => {
-    // Expand differences around the measured average, then lower the quiet
-    // background a little. Equal inputs stay equal; silence stays silent.
-    const contrast = Math.max(0, Math.min(1, mean + (level - mean) * 1.9));
-    return Math.pow(contrast, 1.35);
+    const contrast = Math.max(0, center + (level - mean) * 1.9);
+    // Ease peaks toward the ceiling instead of clipping multiple bands to the
+    // same height. Equal inputs stay equal; silence stays silent.
+    const compressed = contrast <= 0.8
+      ? contrast
+      : 0.8 + 0.2 * (1 - Math.exp(-(contrast - 0.8) / 0.2));
+    return Math.pow(compressed, 1.35);
   });
 
   return Array.from({ length: bands }, (_, i) => {
