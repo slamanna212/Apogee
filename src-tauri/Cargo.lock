@@ -4535,9 +4535,9 @@ dependencies = [
 
 [[package]]
 name = "symphonia"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1758d6c853020a7244de03cc3e0185eaea3f58715122422dd3cc7452e6d4c16a"
+checksum = "a7edef6a96b696d4e0cab5ee9ebb7ca155ed95f30a6b45bbb8b97d2727f02424"
 dependencies = [
  "lazy_static",
  "symphonia-bundle-mp3",
@@ -5524,9 +5524,9 @@ dependencies = [
 
 [[package]]
 name = "transmux"
-version = "0.24.0"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00b27e2bf2eaf7e12e70b2b50aaad1b96ba7274ce40618ca117803dffed72465"
+checksum = "b69a01ac3a5e8c20a9b79215a6201f9fee6e44c1908541e5a838f5d5721ab5d6"
 dependencies = [
  "broadcast-common",
  "broadcast-hls",

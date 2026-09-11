@@ -57,6 +57,11 @@ use tokio_util::sync::CancellationToken;
 
 /// Sent on every request this service makes, across every profile.
 const USER_AGENT: &str = concat!("Apogee/", env!("CARGO_PKG_VERSION"));
+// Keep Stellar's request identity compatible with the Tauri HTTP transport used
+// by 0.8.2. In particular, this avoids changing the provider-facing user agent
+// at the same time as the transport implementation.
+const STELLAR_USER_AGENT: &str = "tauri-plugin-http/2.5.9";
+const STELLAR_ORIGIN: &str = "tauri://localhost";
 
 /// Redirect hops any profile will follow before giving up. Enforced by our
 /// custom [`scheme_restricted_redirect_policy`] rather than
@@ -397,9 +402,13 @@ fn base_builder() -> ClientBuilder {
     // `rustls-tls` feature with `default-features = false`) with its
     // default verifier - certificate verification is never disabled here.
     Client::builder()
-        // Preserve the pre-diagnostic transport; HTTP/2 is enabled only by the
-        // explicit Stellar comparison probe until its behavior is verified.
-        .http1_only()
+        // Allow ALPN to negotiate HTTP/2. Reqwest still falls back to HTTP/1.1
+        // when the origin or an intermediary does not advertise HTTP/2.
+        .http2_adaptive_window(true)
+        // The old Tauri HTTP client kept one cookie jar for its clients. Keep
+        // that behavior for providers and bot defenses that issue a challenge
+        // cookie before serving API responses.
+        .cookie_store(true)
         .user_agent(USER_AGENT)
         .redirect(scheme_restricted_redirect_policy())
 }
@@ -723,6 +732,13 @@ impl NetworkService {
             );
         }
         let mut request = client.get(parsed);
+        if stellar {
+            // tauri-plugin-http automatically supplied Origin from the webview;
+            // the Rust client has no WebviewWindow, so preserve that value here.
+            request = request
+                .header("Origin", STELLAR_ORIGIN)
+                .header("User-Agent", STELLAR_USER_AGENT);
+        }
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
