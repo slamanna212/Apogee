@@ -97,3 +97,44 @@ will fail at the CPAL crate.
 `docs/symphonia-manual-test-guide.md` still has outstanding items: rapid station switching,
 stop latency, pushing the equaliser hard, the spectrum display across several stations,
 device switching and hotplug, suspend/resume, and a long session.
+
+## 9. Settings redesign - category rail + autosave (2026-09-11)
+
+Settings.tsx was rebuilt from a single scrolling card stack into a category rail with one
+page per section (`src/components/settings/*Panel.tsx`), per the imported Claude Design
+handoff. Built from a static mockup and Mantine's docs; nothing here has actually run in the
+app.
+
+- Visual: the rail's left border should sit flush against the primary sidebar's border (the
+  content area's normal 28px/32px padding is skipped only on this page - see the `page ===
+  'settings'` branch in `src/App.tsx`). Check there's no double scrollbar and the transport
+  bar never covers the bottom of either column (both reserve 84px for it).
+- Compact mode (<900px window width, primary sidebar collapses to 68px): confirm the 208px
+  category rail plus the page pane still fit reasonably; this combination wasn't in the
+  mockup.
+- Autosave: type into the Xtream URL/username/password fields and stop - confirm the write
+  (and the "Saved" flash) happens ~500ms later without clicking anything, and that a page
+  switch mid-typing doesn't drop the pending edit.
+- Channel groups: confirm deselecting down to the last remaining group is refused rather than
+  persisting an empty list.
+- Reset to defaults on every page except Connection and About: confirm each page's fields
+  actually return to their defaults, including live effects (equalizer reset while a channel
+  is playing should audibly flatten it; audio device reset should switch output; Discord reset
+  should drop rich presence; OS-notification reset re-prompts for permission if it was denied).
+- Scrobbling reset only turns the "Scrobble to Last.fm" switch off - confirm it does *not*
+  disconnect the Last.fm account itself.
+- About page: confirm "Release notes" opens the GitHub releases page and "Report a bug" opens
+  the issue-template picker, both in the system browser, not in-app.
+- Channel-group MultiSelect pills were restyled via Mantine's `styles={{ pill }}` prop -
+  confirm the selected-group chips actually pick up the accent color rather than silently
+  falling back to Mantine's default pill look.
+
+
+## Audio buffering settings (2026-09-11)
+
+- In Settings → Audio, confirm Audio buffering appears below the EQ. Save custom values,
+  restart playback, and verify the startup/refill timing with real audio. Saving during
+  playback should leave the active output uninterrupted.
+- Relaunch and confirm the saved values remain. Test both the buffering Reset button and
+  the Audio page reset; defaults should be 2,000 ms capacity, 500 ms startup, and 150 ms
+  rebuffer threshold.

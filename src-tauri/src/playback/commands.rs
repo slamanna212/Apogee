@@ -420,6 +420,18 @@ pub async fn player_set_muted(state: State<'_, PlayerState>, muted: bool) -> Res
     Ok(())
 }
 
+/// Save for subsequent sessions without interrupting the active output.
+#[tauri::command]
+pub async fn player_set_buffering(
+    state: State<'_, PlayerState>,
+    buffering: super::engine::BufferSettings,
+) -> Result<(), String> {
+    buffering.validate()?;
+    let mut inner = state.inner.lock().map_err(|_| "player state poisoned")?;
+    inner.settings.buffering = buffering;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn player_set_equalizer(
     state: State<'_, PlayerState>,

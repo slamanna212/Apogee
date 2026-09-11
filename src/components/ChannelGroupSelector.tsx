@@ -19,6 +19,13 @@ export function ChannelGroupSelector({ categories, value, onChange, disabled }: 
       disabled={disabled ?? categories.length === 0}
       searchable
       clearable
+      styles={{
+        pill: {
+          border: '1px solid rgba(139,107,255,.55)',
+          background: 'var(--app-accent-soft)',
+          color: 'var(--app-text)',
+        },
+      }}
       renderOption={({ option, checked }) => (
         <Group flex="1" gap="sm" wrap="nowrap">
           <Checkbox checked={checked} onChange={() => {}} tabIndex={-1} style={{ pointerEvents: 'none' }} />

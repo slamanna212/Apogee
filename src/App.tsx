@@ -21,6 +21,7 @@ import { useSleepTimerStore } from './stores/sleepTimerStore';
 import { setMediaMetadata } from './lib/mediaSession';
 import {
   setDevice as setPlayerDevice,
+  setBuffering as setPlayerBuffering,
   setVolume as setPlayerVolume,
   setEqualizer as setPlayerEqualizer,
 } from './lib/playerClient';
@@ -328,6 +329,7 @@ function AppContent() {
   // settingsLoaded flips true - see src/stores/settingsStore.ts.
   useEffect(() => {
     if (settingsLoaded) {
+      void setPlayerBuffering(settings.audioBuffer);
       void setPlayerDevice(settings.audioDevice?.id ?? null);
       void setPlayerVolume(settings.volume);
       void setPlayerEqualizer(settings.equalizer.enabled, settings.equalizer.gains);
@@ -655,11 +657,17 @@ function AppContent() {
                   style={{
                     flex: 1,
                     background: 'radial-gradient(circle at 30% 0%, var(--app-accent-soft), transparent 55%), var(--app-bg2)',
-                    padding: '28px 32px',
-                    overflowY: 'auto',
+                    // Settings renders its own edge-to-edge category rail (see
+                    // src/pages/Settings.tsx) and manages its own internal scroll
+                    // region, so it opts out of the padding/scroll every other page
+                    // gets here - otherwise its rail wouldn't sit flush against this
+                    // sidebar's border like the design calls for.
+                    padding: page === 'settings' ? 0 : '28px 32px',
+                    overflowY: page === 'settings' ? 'hidden' : 'auto',
                     overflowX: 'hidden',
                     display: 'flex',
                     flexDirection: 'column',
+                    minHeight: 0,
                     color: 'var(--app-text)',
                   }}
                 >

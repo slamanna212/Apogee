@@ -1,3 +1,4 @@
+import type { AudioBufferSettings } from './audioBuffer';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
@@ -108,4 +109,9 @@ export function getSnapshot(): Promise<Snapshot> {
 
 export function onSnapshot(callback: (snapshot: Snapshot) => void): Promise<UnlistenFn> {
   return listen<Snapshot>('player-snapshot', (e) => callback(e.payload));
+}
+
+/** Applies to the next playback session; does not interrupt current audio. */
+export function setBuffering(buffering: AudioBufferSettings): Promise<void> {
+  return invoke('player_set_buffering', { buffering });
 }

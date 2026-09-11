@@ -23,9 +23,10 @@ vi.mock('../lib/secrets', () => ({
 vi.mock('../lib/playerClient', () => ({
   migrateDevice: vi.fn(async () => ({ deviceId: null, notice: null })),
   setDevice: vi.fn(async () => {}),
+  setBuffering: vi.fn(async () => {}),
 }));
 
-import { migrateDevice, setDevice } from '../lib/playerClient';
+import { migrateDevice, setDevice, setBuffering } from '../lib/playerClient';
 import { DEFAULT_SETTINGS, useSettingsStore } from './settingsStore';
 
 beforeEach(() => {
@@ -184,5 +185,42 @@ describe('settingsStore migration of a legacy MPV audio device selection', () =>
     useSettingsStore.getState().dismissDeviceMigrationNotice();
     expect(useSettingsStore.getState().deviceMigrationNotice).toBeNull();
     expect(useSettingsStore.getState().settings.audioDevice).toBeNull();
+  });
+});
+
+
+describe('audio buffering settings', () => {
+  it('uses defaults for old installs and invalid saved thresholds', async () => {
+    await useSettingsStore.getState().load();
+    expect(useSettingsStore.getState().settings.audioBuffer).toEqual(DEFAULT_SETTINGS.audioBuffer);
+    mockStore.data.settings = { audioBuffer: { capacityMs: 100, startMs: 500, rebufferMs: 150 } };
+    await useSettingsStore.getState().load();
+    expect(useSettingsStore.getState().settings.audioBuffer).toEqual(DEFAULT_SETTINGS.audioBuffer);
+  });
+
+  it('sends, persists, and reloads custom buffering', async () => {
+    const audioBuffer = { capacityMs: 4000, startMs: 1000, rebufferMs: 250 };
+    await useSettingsStore.getState().update({ audioBuffer });
+    expect(setBuffering).toHaveBeenCalledExactlyOnceWith(audioBuffer);
+    expect(mockStore.data.settings).toMatchObject({ audioBuffer });
+    await useSettingsStore.getState().load();
+    expect(useSettingsStore.getState().settings.audioBuffer).toEqual(audioBuffer);
+  });
+
+  it('rejects invalid thresholds without changing the engine or storage', async () => {
+    await expect(useSettingsStore.getState().update({
+      audioBuffer: { capacityMs: 2000, startMs: 500, rebufferMs: 500 },
+    })).rejects.toThrow('less than');
+    expect(setBuffering).not.toHaveBeenCalled();
+    expect(mockStore.set).not.toHaveBeenCalled();
+  });
+
+  it('keeps previous settings when the engine rejects an update', async () => {
+    vi.mocked(setBuffering).mockRejectedValueOnce(new Error('Engine unavailable'));
+    await expect(useSettingsStore.getState().update({
+      audioBuffer: { capacityMs: 4000, startMs: 1000, rebufferMs: 250 },
+    })).rejects.toThrow('Engine unavailable');
+    expect(useSettingsStore.getState().settings.audioBuffer).toEqual(DEFAULT_SETTINGS.audioBuffer);
+    expect(mockStore.set).not.toHaveBeenCalled();
   });
 });

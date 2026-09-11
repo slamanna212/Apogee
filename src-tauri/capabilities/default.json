@@ -26,7 +26,10 @@
     "log:default",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "https://www.last.fm/api/auth/**" }]
+      "allow": [
+        { "url": "https://www.last.fm/api/auth/**" },
+        { "url": "https://github.com/slamanna212/Apogee/**" }
+      ]
     }
   ]
 }

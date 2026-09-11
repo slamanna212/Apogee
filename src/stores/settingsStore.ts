@@ -1,8 +1,9 @@
+import { DEFAULT_AUDIO_BUFFER, normalizeAudioBuffer, audioBufferError, type AudioBufferSettings } from '../lib/audioBuffer';
 import { create } from 'zustand';
 import { load, type Store } from '@tauri-apps/plugin-store';
 import { getSecret, setSecret, getBuiltinStellarApiKey, SECRET_KEYS } from '../lib/secrets';
 import { DEFAULT_EQUALIZER, normalizeEqualizerSettings, type EqualizerSettings } from '../lib/equalizer';
-import { migrateDevice, setDevice } from '../lib/playerClient';
+import { migrateDevice, setDevice, setBuffering } from '../lib/playerClient';
 
 export type UpdateChannel = 'stable' | 'beta';
 
@@ -55,6 +56,7 @@ export interface Settings {
   lastSleepTimerMinutes: number;
   audioDevice: AudioDeviceSelection | null;
   equalizer: EqualizerSettings;
+  audioBuffer: AudioBufferSettings;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -74,6 +76,7 @@ export const DEFAULT_SETTINGS: Settings = {
   lastSleepTimerMinutes: 30,
   audioDevice: null,
   equalizer: DEFAULT_EQUALIZER,
+  audioBuffer: DEFAULT_AUDIO_BUFFER,
 };
 
 type PersistedSettings = Omit<Settings, 'password'>;
@@ -181,6 +184,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         categoryNames: migratedCategoryNames,
         volume: typeof stored.volume === 'number' ? stored.volume : (legacyDefaultVolume ?? DEFAULT_SETTINGS.volume),
         equalizer: normalizeEqualizerSettings(stored.equalizer),
+        audioBuffer: normalizeAudioBuffer(stored.audioBuffer),
         password: password ?? '',
         onboardingComplete: isPreOnboardingInstall || Boolean(stored.onboardingComplete),
         audioDevice: (stored.audioDevice as AudioDeviceSelection | null | undefined) ?? null,
@@ -191,6 +195,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     });
   },
   async update(patch) {
+    if (patch.audioBuffer) {
+      const error = audioBufferError(patch.audioBuffer);
+      if (error) throw new Error(error);
+      await setBuffering(patch.audioBuffer);
+    }
     const previous = get().settings;
     const next = { ...previous, ...patch };
     set({ settings: next });

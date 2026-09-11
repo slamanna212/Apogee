@@ -61,6 +61,7 @@ pub fn run() {
             playback::commands::player_set_volume,
             playback::commands::player_set_muted,
             playback::commands::player_set_equalizer,
+            playback::commands::player_set_buffering,
             playback::commands::player_list_devices,
             playback::commands::player_set_device,
             playback::commands::player_migrate_device,

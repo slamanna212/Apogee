@@ -46,11 +46,6 @@ use super::device::DeviceRequest;
 use super::source::{self, SourceError};
 use crate::network::NetworkService;
 
-/// How much decoded audio to hold before playback starts, and total ring capacity.
-/// Internal thresholds, tuned against tests, not latency guarantees.
-const START_BUFFER_MS: u64 = 500;
-const RING_CAPACITY_MS: u64 = 2_000;
-const REBUFFER_MS: u64 = 150;
 /// Bounded queue between the network task and the decode thread.
 const EVENT_QUEUE_DEPTH: usize = 256;
 /// How often the decode thread polls for new input, cancellation, and output health while it
@@ -65,9 +60,46 @@ const RING_FULL_POLL_INTERVAL: Duration = Duration::from_millis(5);
 /// attempt has been cancelled/confirmed.
 const CONNECT_WATCHDOG_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-/// Audio settings that can change while a session runs.
+/// Decoded audio buffering, fixed for the lifetime of an output session.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BufferSettings {
+    pub capacity_ms: u64,
+    pub start_ms: u64,
+    pub rebuffer_ms: u64,
+}
+
+impl Default for BufferSettings {
+    fn default() -> Self {
+        Self {
+            capacity_ms: 2000,
+            start_ms: 500,
+            rebuffer_ms: 150,
+        }
+    }
+}
+
+impl BufferSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if !(100..=10_000).contains(&self.capacity_ms) {
+            return Err("Buffer capacity must be between 100 and 10,000 ms".into());
+        }
+        if self.start_ms < 50 || self.start_ms > self.capacity_ms {
+            return Err(
+                "Startup buffer must be at least 50 ms and no greater than capacity".into(),
+            );
+        }
+        if self.rebuffer_ms >= self.start_ms {
+            return Err("Rebuffer threshold must be less than the startup buffer".into());
+        }
+        Ok(())
+    }
+}
+
+/// Audio preferences. Buffering is fixed at session start; other settings can change live.
 #[derive(Debug, Clone)]
 pub struct AudioSettings {
+    pub buffering: BufferSettings,
     pub volume: u8,
     pub muted: bool,
     pub equalizer_enabled: bool,
@@ -79,6 +111,7 @@ pub struct AudioSettings {
 impl Default for AudioSettings {
     fn default() -> Self {
         Self {
+            buffering: BufferSettings::default(),
             volume: 100,
             muted: false,
             equalizer_enabled: false,
@@ -219,6 +252,7 @@ pub fn start_session(
     network: NetworkService,
     sink: Arc<dyn EventSink>,
 ) -> Result<Session, String> {
+    settings.buffering.validate()?;
     let cancel = CancellationToken::new();
     let stopped = Arc::new(AtomicBool::new(false));
     // A single-attempt latch: whichever of {this watchdog, the decode thread's first
@@ -231,12 +265,15 @@ pub fn start_session(
     let prepared = super::audio_out::prepare(device).map_err(|e| e.to_string())?;
     let format = prepared.format();
 
-    let (producer, consumer) = pcm_ring(format, format.frames_for_millis(RING_CAPACITY_MS));
+    let (producer, consumer) = pcm_ring(
+        format,
+        format.frames_for_millis(settings.buffering.capacity_ms),
+    );
     let buffer_state = Arc::new(BufferStateFlag::default());
     let consumer = GatedConsumer::new(
         consumer,
-        format.frames_for_millis(START_BUFFER_MS),
-        format.frames_for_millis(REBUFFER_MS),
+        format.frames_for_millis(settings.buffering.start_ms),
+        format.frames_for_millis(settings.buffering.rebuffer_ms),
         Arc::clone(&buffer_state),
     );
     let (mut control_tx, control_rx) = control_channel(8);
@@ -1441,5 +1478,49 @@ mod tests {
 
         counter_task.abort();
         let _ = rx.recv().await; // keep the receiver alive until here
+    }
+}
+
+#[cfg(test)]
+mod buffer_settings_tests {
+    use super::BufferSettings;
+
+    #[test]
+    fn buffering_accepts_defaults_and_valid_boundaries() {
+        assert!(BufferSettings::default().validate().is_ok());
+        assert!(BufferSettings {
+            capacity_ms: 100,
+            start_ms: 50,
+            rebuffer_ms: 0
+        }
+        .validate()
+        .is_ok());
+        assert!(BufferSettings {
+            capacity_ms: 10_000,
+            start_ms: 10_000,
+            rebuffer_ms: 9_999
+        }
+        .validate()
+        .is_ok());
+    }
+
+    #[test]
+    fn buffering_rejects_unreachable_or_unbounded_thresholds() {
+        for (capacity_ms, start_ms, rebuffer_ms) in [
+            (99, 50, 0),
+            (10_001, 500, 150),
+            (2000, 49, 0),
+            (100, 101, 0),
+            (2000, 500, 500),
+            (2000, 500, 501),
+        ] {
+            assert!(BufferSettings {
+                capacity_ms,
+                start_ms,
+                rebuffer_ms
+            }
+            .validate()
+            .is_err());
+        }
     }
 }
