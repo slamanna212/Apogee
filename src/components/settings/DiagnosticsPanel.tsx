@@ -16,6 +16,21 @@ export const DiagnosticsPanel = forwardRef<SettingsResetHandle, SettingsPanelPro
 
   const [logExportStatus, setLogExportStatus] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle');
   const [logExportError, setLogExportError] = useState<string | null>(null);
+  const [stellarRunning, setStellarRunning] = useState(false);
+  const [stellarResult, setStellarResult] = useState('');
+
+  async function runStellarDiagnostics() {
+    setStellarRunning(true);
+    setStellarResult('Comparing Stellar connections. This may take several minutes.');
+    try {
+      await invoke('stellar_run_diagnostics');
+      setStellarResult('Finished. Download the log file below to share the results.');
+    } catch (error) {
+      setStellarResult(`Diagnostics failed: ${String(error)}`);
+    } finally {
+      setStellarRunning(false);
+    }
+  }
 
   const channels = useChannelStore((s) => s.channels);
   const channelMetadata = useChannelStore((s) => s.channelMetadata);
@@ -67,6 +82,9 @@ export const DiagnosticsPanel = forwardRef<SettingsResetHandle, SettingsPanelPro
         onChange={(e) => handleVerboseChange(e.currentTarget.checked)}
       />
       <Group align="center">
+        <Button onClick={runStellarDiagnostics} loading={stellarRunning}>
+          Run Stellar diagnostics
+        </Button>
         <Button onClick={handleDownloadLog} loading={logExportStatus === 'saving'}>
           Download log file
         </Button>
@@ -76,6 +94,7 @@ export const DiagnosticsPanel = forwardRef<SettingsResetHandle, SettingsPanelPro
           </Text>
         )}
       </Group>
+      {stellarResult && <Text size="sm">{stellarResult}</Text>}
       {logExportStatus === 'error' && (
         <Text c="red" size="sm">
           Couldn't save log file: {logExportError}

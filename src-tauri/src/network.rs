@@ -321,7 +321,7 @@ pub async fn cancellable_sleep(
 }
 
 /// Only diagnostic response fields: never dump cookies, authorization, or whole headers.
-fn stellar_response_headers(
+pub(crate) fn stellar_response_headers(
     headers: &reqwest::header::HeaderMap,
     request_headers: &[(&str, &str)],
 ) -> String {
@@ -379,6 +379,9 @@ fn base_builder() -> ClientBuilder {
     // `rustls-tls` feature with `default-features = false`) with its
     // default verifier - certificate verification is never disabled here.
     Client::builder()
+        // Preserve the pre-diagnostic transport; HTTP/2 is enabled only by the
+        // explicit Stellar comparison probe until its behavior is verified.
+        .http1_only()
         .user_agent(USER_AGENT)
         .redirect(scheme_restricted_redirect_policy())
 }
@@ -620,8 +623,9 @@ impl NetworkService {
         })?;
         if stellar {
             log::debug!(
-                "stellar HTTP response id={request_id}: status={} protocol={:?} headers_ms={} final_origin={} final_path={} headers={}",
+                "stellar HTTP response id={request_id}: status={} protocol={:?} headers_ms={} remote_addr={:?} final_origin={} final_path={} headers={}",
                 response.status().as_u16(), response.version(), started.elapsed().as_millis(),
+                response.remote_addr(),
                 redact_url(response.url()),
                 if response.url().host_str() == Some("api.stellartunerlog.com") { response.url().path() } else { "[redacted]" },
                 stellar_response_headers(response.headers(), headers),
@@ -801,7 +805,7 @@ async fn fetch_bounded(
 }
 
 /// Reads a response body with a hard byte ceiling, cancellable throughout.
-async fn read_bounded(
+pub(crate) async fn read_bounded(
     response: reqwest::Response,
     max_bytes: usize,
     cancel: &CancellationToken,

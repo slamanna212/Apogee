@@ -15,6 +15,7 @@ mod notifications;
 mod playback;
 mod secrets;
 mod stellar;
+mod stellar_diagnostics;
 mod updater;
 mod window_state;
 mod xtream;
@@ -72,6 +73,7 @@ pub fn run() {
             stellar::stellar_now_playing,
             stellar::stellar_channels,
             stellar::stellar_history,
+            stellar_diagnostics::stellar_run_diagnostics,
             secrets::secrets_set,
             secrets::secrets_get,
             secrets::secrets_delete,
