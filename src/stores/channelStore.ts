@@ -106,13 +106,14 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
         nowPlaying: nowPlayingMapsEqual(nowPlaying, next) ? nowPlaying : next,
         pollFailureCount: 0,
       });
-    } catch {
+    } catch (err) {
       if (revision !== pollRevision) return;
       // transient poll failure - keep showing the last known now-playing data,
       // but track it so the caller can back off instead of polling at a fixed
       // rate through an outage
       set((s) => ({ pollFailureCount: s.pollFailureCount + 1 }));
-      void logWarn(`Stellar now-playing poll failed (${get().pollFailureCount} consecutive failures); retaining previous metadata`).catch(() => {});
+      const message = err instanceof Error ? err.message : String(err);
+      void logWarn(`Stellar now-playing poll failed: ${message} (${get().pollFailureCount} consecutive failures); retaining previous metadata`).catch(() => {});
     }
   },
   async fetchChannelMetadata() {

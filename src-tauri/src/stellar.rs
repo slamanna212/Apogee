@@ -54,7 +54,10 @@ async fn get_json(
     let body = network
         .fetch_json_with_headers(url, &headers, &cancel)
         .await
-        .map_err(|e| describe(endpoint, &e))?;
+        .map_err(|e| {
+            log::warn!("stellar {endpoint} request failed: {e}");
+            describe(endpoint, &e)
+        })?;
     serde_json::from_slice(&body.bytes)
         .map_err(|_| format!("StellarTunerLog {endpoint} returned invalid JSON"))
 }
