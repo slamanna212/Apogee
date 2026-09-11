@@ -72,8 +72,8 @@ pub struct BufferSettings {
 impl Default for BufferSettings {
     fn default() -> Self {
         Self {
-            capacity_ms: 2000,
-            start_ms: 500,
+            capacity_ms: 5000,
+            start_ms: 1000,
             rebuffer_ms: 150,
         }
     }
@@ -1483,7 +1483,36 @@ mod tests {
 
 #[cfg(test)]
 mod buffer_settings_tests {
-    use super::BufferSettings;
+    use super::*;
+
+    #[test]
+    fn default_reserve_survives_a_750ms_delivery_gap() {
+        let settings = BufferSettings::default();
+        let format = OutputFormat::new(48_000, 2);
+        let (mut producer, consumer) =
+            pcm_ring(format, format.frames_for_millis(settings.capacity_ms));
+        let state = Arc::new(BufferStateFlag::default());
+        let mut output = GatedConsumer::new(
+            consumer,
+            format.frames_for_millis(settings.start_ms),
+            format.frames_for_millis(settings.rebuffer_ms),
+            Arc::clone(&state),
+        );
+        let initial = vec![0.5; format.frames_for_millis(settings.start_ms) * 2];
+        assert_eq!(producer.push_frames(&initial), initial.len() / 2);
+        let mut callback = vec![0.0; format.frames_for_millis(10) * 2];
+        // No producer activity for 750 ms after playback begins.
+        for _ in 0..75 {
+            assert_eq!(output.pop_into(&mut callback), callback.len() / 2);
+            assert_eq!(state.get(), BufferState::Playing);
+        }
+        // Delivery resumes without silence or another buffering transition.
+        for _ in 0..100 {
+            assert_eq!(producer.push_frames(&callback), callback.len() / 2);
+            assert_eq!(output.pop_into(&mut callback), callback.len() / 2);
+            assert_eq!(state.get(), BufferState::Playing);
+        }
+    }
 
     #[test]
     fn buffering_accepts_defaults_and_valid_boundaries() {

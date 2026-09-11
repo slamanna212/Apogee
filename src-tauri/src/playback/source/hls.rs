@@ -23,7 +23,7 @@
 //! block the controller will retry on top of, not the retry policy itself.
 
 use std::collections::VecDeque;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use apogee_playback_core::detect::{is_encrypted_playlist, Unsupported};
 use apogee_playback_core::pipeline::{HlsIngest, PipelineError, SourceEvent};
@@ -46,6 +46,8 @@ pub struct HlsSource {
     /// `SourceEvent` per `Output`, so these are drained before polling the
     /// client again.
     pending: VecDeque<SourceEvent>,
+    actions: VecDeque<Action>,
+    playlist_received_at: Instant,
 }
 
 impl HlsSource {
@@ -92,12 +94,15 @@ impl HlsSource {
         client
             .on_playlist(initial_body)
             .map_err(|error| SourceError::Demux(redact_text(&error.to_string())))?;
+        let actions = scheduled_actions(&mut client);
         Ok(Self {
             client,
             ingest: HlsIngest::new(),
             network,
             cancel,
             pending: VecDeque::new(),
+            actions,
+            playlist_received_at: Instant::now(),
         })
     }
 
@@ -130,7 +135,7 @@ impl HlsSource {
                 self.pending.extend(events);
                 continue;
             }
-            match self.client.poll() {
+            match self.actions.pop_front() {
                 Some(action) => self.service(action).await?,
                 None => return Ok(None),
             }
@@ -160,7 +165,10 @@ impl HlsSource {
                         reject_if_encrypted(&body.bytes)?;
                         self.client
                             .on_playlist(&body.bytes)
-                            .map_err(|error| SourceError::Demux(redact_text(&error.to_string())))
+                            .map_err(|error| SourceError::Demux(redact_text(&error.to_string())))?;
+                        self.playlist_received_at = Instant::now();
+                        self.actions.extend(scheduled_actions(&mut self.client));
+                        Ok(())
                     }
                     Err(NetworkError::Cancelled) => Err(SourceError::Cancelled),
                     Err(error) => {
@@ -201,8 +209,10 @@ impl HlsSource {
                 }
             }
             Action::WaitMs(ms) => {
-                let ms = *ms;
-                cancellable_sleep(Duration::from_millis(ms), &self.cancel)
+                // Downloading and draining segments already spends part (or all) of
+                // the reload interval. Do not add that time again as a fresh sleep.
+                let remaining = reload_delay(*ms, self.playlist_received_at.elapsed());
+                cancellable_sleep(remaining, &self.cancel)
                     .await
                     .map_err(SourceError::from)
             }
@@ -214,6 +224,29 @@ impl HlsSource {
             _ => Ok(()),
         }
     }
+}
+
+/// hls-runtime 0.6 queues resources, then FetchPlaylist, then WaitMs. Servicing
+/// that literally leaves the old wait ahead of the *new* playlist's resources.
+/// Pace the reload instead, so newly discovered audio is fetched immediately.
+fn scheduled_actions(client: &mut HlsClient) -> VecDeque<Action> {
+    let mut actions = VecDeque::new();
+    while let Some(action) = client.poll() {
+        if matches!(action, Action::WaitMs(_))
+            && matches!(actions.back(), Some(Action::FetchPlaylist { .. }))
+        {
+            let reload = actions.pop_back().unwrap();
+            actions.push_back(action);
+            actions.push_back(reload);
+        } else {
+            actions.push_back(action);
+        }
+    }
+    actions
+}
+
+fn reload_delay(interval_ms: u64, elapsed: Duration) -> Duration {
+    Duration::from_millis(interval_ms).saturating_sub(elapsed)
 }
 
 /// Rejects a playlist body carrying `#EXT-X-KEY` before it can reach
@@ -293,5 +326,84 @@ mod byte_range_tests {
         let data = vec![1u8, 2, 3];
         assert!(slice_byte_range(&data, u64::MAX, 1).is_err());
         assert!(slice_byte_range(&data, 1, u64::MAX).is_err());
+    }
+}
+
+#[cfg(test)]
+mod scheduling_tests {
+    use super::*;
+
+    fn client() -> HlsClient {
+        let mut client = HlsClient::new("http://localhost/live.m3u8");
+        assert!(matches!(client.poll(), Some(Action::FetchPlaylist { .. })));
+        client
+    }
+
+    #[test]
+    fn live_reload_wait_precedes_reload_and_never_new_segments() {
+        let mut client = client();
+        for sequence in 0..3 {
+            let playlist = format!(
+                "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:{sequence}\n#EXTINF:6,\n{sequence}.ts\n"
+            );
+            client.on_playlist(playlist.as_bytes()).unwrap();
+            let mut actions = scheduled_actions(&mut client);
+            let Some(Action::FetchResource { id, .. }) = actions.pop_front() else {
+                panic!("new audio must be fetched before waiting or reloading");
+            };
+            client
+                .on_resource(
+                    id,
+                    include_bytes!("../../../playback-core/tests/fixtures/aac-0.ts"),
+                )
+                .unwrap();
+            assert!(matches!(actions.pop_front(), Some(Action::WaitMs(3000))));
+            assert!(matches!(
+                actions.pop_front(),
+                Some(Action::FetchPlaylist { .. })
+            ));
+            assert!(actions.is_empty());
+        }
+    }
+
+    #[test]
+    fn time_spent_delivering_audio_counts_toward_the_reload_interval() {
+        assert_eq!(
+            reload_delay(3000, Duration::from_millis(1250)),
+            Duration::from_millis(1750)
+        );
+        assert_eq!(reload_delay(3000, Duration::from_secs(3)), Duration::ZERO);
+        assert_eq!(reload_delay(3000, Duration::from_secs(8)), Duration::ZERO);
+    }
+
+    #[test]
+    fn ended_playlists_have_no_reload_or_wait() {
+        let mut client = client();
+        client
+            .on_playlist(b"#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\n0.ts\n#EXT-X-ENDLIST\n")
+            .unwrap();
+        let mut actions = scheduled_actions(&mut client);
+        assert!(matches!(
+            actions.pop_front(),
+            Some(Action::FetchResource { .. })
+        ));
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn blocking_reload_has_no_added_wait() {
+        let mut client = client();
+        client.on_playlist(b"#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES\n#EXT-X-PART-INF:PART-TARGET=1.0\n#EXTINF:6,\n0.ts\n").unwrap();
+        let actions = scheduled_actions(&mut client);
+        assert!(!actions
+            .iter()
+            .any(|action| matches!(action, Action::WaitMs(_))));
+        assert!(matches!(
+            actions.back(),
+            Some(Action::FetchPlaylist {
+                blocking: Some(_),
+                ..
+            })
+        ));
     }
 }

@@ -198,6 +198,12 @@ describe('audio buffering settings', () => {
     expect(useSettingsStore.getState().settings.audioBuffer).toEqual(DEFAULT_SETTINGS.audioBuffer);
   });
 
+  it('upgrades the previous buffer defaults on existing installs', async () => {
+    mockStore.data.settings = { audioBuffer: { capacityMs: 2000, startMs: 500, rebufferMs: 150 } };
+    await useSettingsStore.getState().load();
+    expect(useSettingsStore.getState().settings.audioBuffer).toEqual(DEFAULT_SETTINGS.audioBuffer);
+  });
+
   it('sends, persists, and reloads custom buffering', async () => {
     const audioBuffer = { capacityMs: 4000, startMs: 1000, rebufferMs: 250 };
     await useSettingsStore.getState().update({ audioBuffer });

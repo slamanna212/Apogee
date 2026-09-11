@@ -5,8 +5,8 @@ export interface AudioBufferSettings {
 }
 
 export const DEFAULT_AUDIO_BUFFER: AudioBufferSettings = {
-  capacityMs: 2000,
-  startMs: 500,
+  capacityMs: 5000,
+  startMs: 1000,
   rebufferMs: 150,
 };
 
@@ -20,5 +20,7 @@ export function audioBufferError(value: AudioBufferSettings): string | null {
 
 export function normalizeAudioBuffer(value: unknown): AudioBufferSettings {
   const candidate = { ...DEFAULT_AUDIO_BUFFER, ...(typeof value === 'object' && value !== null ? value : {}) };
-  return audioBufferError(candidate) ? { ...DEFAULT_AUDIO_BUFFER } : candidate;
+  // Upgrade the previous shipped defaults; retain custom tuning.
+  const previousDefaults = candidate.capacityMs === 2000 && candidate.startMs === 500 && candidate.rebufferMs === 150;
+  return audioBufferError(candidate) || previousDefaults ? { ...DEFAULT_AUDIO_BUFFER } : candidate;
 }
