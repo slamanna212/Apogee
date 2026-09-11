@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { debug as logDebug } from '@tauri-apps/plugin-log';
 import { spectrumDisplayLevels } from '../lib/spectrumDisplay';
+import { useSettingsStore } from '../stores/settingsStore';
 
 const BASELINE = 0.08;
 const REAL_LEVELS_STALE_MS = 1000;
@@ -62,6 +64,7 @@ export function Waveform({ active, bands = 8, size = 'md' }: WaveformProps) {
     let raf: number;
     const start = performance.now();
     let previous = start;
+    let lastDiagnostic = start;
     const displayed = Array<number>(bands).fill(0);
 
     function tick(now: number) {
@@ -92,11 +95,26 @@ export function Waveform({ active, bands = 8, size = 'md' }: WaveformProps) {
         el.style.transform = `scaleY(${BASELINE + displayed[i] * (1 - BASELINE)})`;
       });
 
+      if (now - lastDiagnostic >= 5000 && useSettingsStore.getState().settings.verboseLogging) {
+        lastDiagnostic = now;
+        // Read geometry only during diagnostics, after all bar writes. This
+        // distinguishes saturated input from a host webview rendering problem.
+        void logDebug(`spectrum display: ${JSON.stringify({
+          size, bands, fresh: hasFreshLevels, levels: realLevels, targets,
+          bars: barRefs.current.map((el) => el ? {
+            transform: el.style.transform,
+            computedTransform: getComputedStyle(el).transform,
+            layoutHeight: el.offsetHeight,
+            renderedHeight: el.getBoundingClientRect().height,
+          } : null),
+        })}`).catch(() => {});
+      }
+
       raf = requestAnimationFrame(tick);
     }
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [active, bands]);
+  }, [active, bands, size]);
 
   const barWidth = size === 'sm' ? 2.5 : 3;
   const gap = size === 'sm' ? 2 : 3;

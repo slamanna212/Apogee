@@ -164,6 +164,10 @@ export function ChannelGrid({
       ? Math.round((containerSize.width - CHANNEL_CARD_GAP * (columns - 1)) / columns) + 62
       : 122;
 
+  // @tanstack/react-virtual returns fresh accessor functions (e.g. measureElement) each
+  // render, which the React Compiler can't memoize; this is an accepted, known limitation
+  // of the library rather than something fixable here.
+  // oxlint-disable-next-line react/incompatible-library
   const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: rowCount,
     getScrollElement: () => containerRef.current,

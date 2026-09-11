@@ -40,8 +40,6 @@ export function ChannelModal({ channel, metadata, apiKey, isFavorite, onToggleFa
   }, []);
 
   useEffect(() => {
-    setHistory([]);
-    setVisibleCount(BATCH_SIZE);
     if (!metadata || !apiKey) return;
     let cancelled = false;
 

@@ -739,6 +739,7 @@ function AppContent() {
 
       {modalChannel && (
         <ChannelModal
+          key={modalChannel.stream_id}
           channel={modalChannel}
           metadata={channelMetadata.get(modalChannel.stream_id)}
           apiKey={stellarApiKey}

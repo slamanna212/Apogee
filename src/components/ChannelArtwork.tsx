@@ -2,7 +2,7 @@ import { useState, type CSSProperties } from 'react';
 import { useComputedColorScheme } from '@mantine/core';
 import type { StellarChannel } from '../types/stellarTunerLog';
 import { pickChannelLogoUrl } from '../lib/channelLogo';
-import { hashGradient } from './ChannelCard';
+import { hashGradient } from '../lib/channelGradient';
 
 interface ChannelArtworkProps {
   channelName: string;

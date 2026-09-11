@@ -788,6 +788,8 @@ fn analysis_loop(
     let channels = format.channels.max(1) as usize;
     let mut scratch = vec![0.0f32; 1024 * channels];
     let mut analyzer: Option<SpectrumAnalyzer> = None;
+    let mut diagnostic_analyzer: Option<SpectrumAnalyzer> = None;
+    let mut last_diagnostic = std::time::Instant::now();
     while !stopped.load(Ordering::Relaxed) {
         let frames = consumer.pop_into(&mut scratch);
         if frames == 0 {
@@ -796,11 +798,36 @@ fn analysis_loop(
         }
         if !enabled.load(Ordering::Relaxed) {
             analyzer = None;
+            diagnostic_analyzer = None;
             continue;
         }
         let analyzer =
             analyzer.get_or_insert_with(|| SpectrumAnalyzer::new(format.sample_rate, channels));
+        // Worker-only diagnostics: compare the actual tap with emitted levels on
+        // different hosts without touching callback timing or display calibration.
+        let diagnostic_db = if log::log_enabled!(log::Level::Debug) {
+            diagnostic_analyzer
+                .get_or_insert_with(|| SpectrumAnalyzer::new(format.sample_rate, channels))
+                .measure_band_db(&scratch[..frames * channels])
+        } else {
+            diagnostic_analyzer = None;
+            None
+        };
         if let Some(levels) = analyzer.push(&scratch[..frames * channels]) {
+            if last_diagnostic.elapsed() >= Duration::from_secs(5) {
+                if let Some(db) = diagnostic_db {
+                    let samples = &scratch[..frames * channels];
+                    let peak = samples.iter().fold(0.0f32, |peak, s| peak.max(s.abs()));
+                    let rms = (samples.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>()
+                        / samples.len() as f64)
+                        .sqrt();
+                    log::debug!(
+                        "spectrum tap: rate={} channels={} frames={} peak={:.5} rms={:.5} band_db={:.2?} levels={:.3?}",
+                        format.sample_rate, channels, frames, peak, rms, db, levels
+                    );
+                    last_diagnostic = std::time::Instant::now();
+                }
+            }
             sink.emit(EngineEvent::Spectrum { levels });
         }
     }
