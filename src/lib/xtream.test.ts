@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchWithTimeout } from './fetchWithTimeout';
-import { buildStreamUrl, getLiveCategories, getLiveStreams, type XtreamCredentials } from './xtream';
+import { invoke } from '@tauri-apps/api/core';
+import { getLiveCategories, getLiveStreams, type XtreamCredentials } from './xtream';
 
-vi.mock('./fetchWithTimeout', () => ({ fetchWithTimeout: vi.fn() }));
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
+
+// URL construction, credential escaping and error-message redaction moved into Rust
+// (src-tauri/src/xtream.rs) and are tested there against the real serialiser. What is
+// left here is the argument contract, which is exactly what breaks silently if either
+// side is renamed.
 
 const creds: XtreamCredentials = {
   baseUrl: 'http://example.com:8080',
@@ -10,74 +15,44 @@ const creds: XtreamCredentials = {
   password: 'hunter2',
 };
 
-function okResponse(body: unknown): Response {
-  return { ok: true, status: 200, json: async () => body } as Response;
-}
-
 beforeEach(() => {
-  vi.mocked(fetchWithTimeout).mockReset();
+  vi.mocked(invoke).mockReset();
 });
 
 describe('getLiveCategories', () => {
-  it('requests player_api.php with credentials and the action', async () => {
-    vi.mocked(fetchWithTimeout).mockResolvedValue(okResponse([]));
+  it('invokes the Rust command with the credentials', async () => {
+    vi.mocked(invoke).mockResolvedValue([]);
     await getLiveCategories(creds);
-
-    const url = new URL(vi.mocked(fetchWithTimeout).mock.calls[0][0]);
-    expect(url.pathname).toBe('/player_api.php');
-    expect(url.searchParams.get('username')).toBe('alice');
-    expect(url.searchParams.get('password')).toBe('hunter2');
-    expect(url.searchParams.get('action')).toBe('get_live_categories');
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('xtream_get_live_categories', { creds });
   });
 
-  it('returns the parsed JSON body', async () => {
+  it('returns whatever Rust returns, unchanged', async () => {
     const categories = [{ category_id: '5', category_name: 'SiriusXM', parent_id: 0 }];
-    vi.mocked(fetchWithTimeout).mockResolvedValue(okResponse(categories));
+    vi.mocked(invoke).mockResolvedValue(categories);
     await expect(getLiveCategories(creds)).resolves.toEqual(categories);
   });
 
-  it('surfaces HTTP failures with the status code', async () => {
-    vi.mocked(fetchWithTimeout).mockResolvedValue({ ok: false, status: 403 } as Response);
+  it('propagates the error Rust produced rather than rewrapping it', async () => {
+    // Rust already redacts; rewrapping here would risk re-adding a URL.
+    vi.mocked(invoke).mockRejectedValue(new Error('get_live_categories failed: HTTP 403'));
     await expect(getLiveCategories(creds)).rejects.toThrow('get_live_categories failed: HTTP 403');
   });
 
-  it('never leaks the credential-bearing URL from a network error', async () => {
-    vi.mocked(fetchWithTimeout).mockRejectedValue(
-      new Error('fetch failed: http://example.com:8080/player_api.php?username=alice&password=hunter2'),
-    );
-    const err = await getLiveCategories(creds).catch((e: Error) => e);
-    expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toBe('get_live_categories failed: could not reach the Xtream server');
-    expect((err as Error).message).not.toContain('hunter2');
+  it('never builds a URL itself', async () => {
+    vi.mocked(invoke).mockResolvedValue([]);
+    await getLiveCategories(creds);
+    const [, args] = vi.mocked(invoke).mock.calls[0];
+    expect(JSON.stringify(args)).not.toContain('player_api.php');
   });
 });
 
 describe('getLiveStreams', () => {
-  it('passes the category_id parameter', async () => {
-    vi.mocked(fetchWithTimeout).mockResolvedValue(okResponse([]));
+  it('passes the category id under the name the command expects', async () => {
+    vi.mocked(invoke).mockResolvedValue([]);
     await getLiveStreams(creds, '12');
-
-    const url = new URL(vi.mocked(fetchWithTimeout).mock.calls[0][0]);
-    expect(url.searchParams.get('action')).toBe('get_live_streams');
-    expect(url.searchParams.get('category_id')).toBe('12');
-  });
-
-  it('normalizes network errors without the URL', async () => {
-    vi.mocked(fetchWithTimeout).mockRejectedValue(new TypeError('Load failed'));
-    await expect(getLiveStreams(creds, '12')).rejects.toThrow(
-      'get_live_streams failed: could not reach the Xtream server',
-    );
-  });
-});
-
-describe('buildStreamUrl', () => {
-  it('builds the live stream URL from credentials, stream id, and extension', () => {
-    expect(buildStreamUrl(creds, 42, '.ts')).toBe('http://example.com:8080/live/alice/hunter2/42.ts');
-    expect(buildStreamUrl(creds, 42, '.m3u8')).toBe('http://example.com:8080/live/alice/hunter2/42.m3u8');
-  });
-
-  it('strips trailing slashes from the base URL', () => {
-    const slashed = { ...creds, baseUrl: 'http://example.com:8080///' };
-    expect(buildStreamUrl(slashed, 7, '.ts')).toBe('http://example.com:8080/live/alice/hunter2/7.ts');
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('xtream_get_live_streams', {
+      creds,
+      categoryId: '12',
+    });
   });
 });

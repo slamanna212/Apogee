@@ -135,6 +135,9 @@ jobs:
       contents: write
     strategy:
       fail-fast: false
+      # Each platform merges its updater entry into the release's existing latest.json.
+      # Serialize those read/modify/write uploads so concurrent jobs cannot lose entries.
+      max-parallel: 1
       matrix:
         include:
           - platform: 'ubuntu-22.04'
@@ -156,7 +159,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential curl wget file libxdo-dev libssl-dev \
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm libfuse2 xdg-utils \
-            pkg-config libglib2.0-bin libgtk-3-bin libgdk-pixbuf2.0-bin desktop-file-utils zsync
+            pkg-config libglib2.0-bin libgtk-3-bin libgdk-pixbuf2.0-bin desktop-file-utils zsync \
+            libasound2-dev
+
+      - name: Ensure ALSA dev headers (self-hosted runner)
+        # The self-hosted runner is pre-provisioned with its own toolchain
+        # and skips "Install Linux dependencies" above, so it never picked
+        # up libasound2-dev when the Rust audio engine (alsa-sys/cpal) was
+        # added. Installing it here too keeps that provisioning gap from
+        # breaking the build again as new deps show up, without redoing the
+        # rest of the (already-present) toolchain install on every run.
+        if: matrix.platform == 'ubuntu-22.04' && runner.environment != 'github-hosted'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -193,7 +209,19 @@ jobs:
           "
           VERSION="$VERSION" perl -i -pe 'BEGIN{$done=0} if (!$done && s/^version = ".*"/version = "$ENV{VERSION}"/) { $done=1 }' src-tauri/Cargo.toml
 
-      - name: Build and release
+      # Linux takes a different path than Windows/macOS: the AppImage must be
+      # repacked to drop a bundled host-interface library (#67) before it is
+      # signed, and the installed Tauri CLI (2.11.4) has no config knob or
+      # AppDir hook that runs between linuxdeploy staging an AppDir and it
+      # packaging the final AppImage - that whole sequence is one atomic
+      # `linuxdeploy ... --output appimage` call the bundler makes for us,
+      # and `cargo tauri build` signs every updater-eligible bundle
+      # (deb/rpm/appimage) immediately afterward in the same process, with
+      # no hook in between build and sign either. So compiling+bundling,
+      # finalizing the AppImage, signing, and uploading are split into three
+      # steps below instead of tauri-action's single build+sign+upload call.
+      - name: Build and release (Windows/macOS)
+        if: matrix.platform != 'ubuntu-22.04'
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -216,6 +244,58 @@ jobs:
           releaseId: ${{ needs.prepare-release.outputs.release_id }}
           releaseDraft: true
           prerelease: ${{ needs.check-version.outputs.prerelease == 'true' }}
+
+      # Build only, unsigned: --no-sign skips cargo-tauri's built-in updater
+      # signing for deb/rpm/appimage so nothing gets signed before the
+      # AppImage is finalized below. No tagName/releaseId is passed, so
+      # tauri-action builds without uploading anything yet.
+      - name: Build Linux bundles (unsigned)
+        if: matrix.platform == 'ubuntu-22.04'
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STELLAR_API_KEY: ${{ secrets.STELLAR_API_KEY }}
+          LASTFM_SHARED_SECRET: ${{ secrets.LASTFM_SHARED_SECRET }}
+        with:
+          args: '--no-sign'
+
+      - name: Finalize AppImage and sign Linux updater artifacts
+        if: matrix.platform == 'ubuntu-22.04'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: scripts/finalize-and-sign-linux-bundles.sh
+
+      # --no-bundle skips cargo-tauri's bundle step entirely (bundling and
+      # signing together), so this only recompiles (a cached no-op) and then
+      # finds the already-finalized, already-signed deb/rpm/appimage plus
+      # their correct .sig files from the previous step by their
+      # conventional paths, uploads them, and builds latest.json from those
+      # signatures.
+      - name: Upload Linux bundles and updater manifest
+        if: matrix.platform == 'ubuntu-22.04'
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STELLAR_API_KEY: ${{ secrets.STELLAR_API_KEY }}
+          LASTFM_SHARED_SECRET: ${{ secrets.LASTFM_SHARED_SECRET }}
+        with:
+          args: '--no-bundle'
+          tagName: ${{ needs.check-version.outputs.tag }}
+          releaseId: ${{ needs.prepare-release.outputs.release_id }}
+          releaseDraft: true
+          prerelease: ${{ needs.check-version.outputs.prerelease == 'true' }}
+
+      - name: Upload Linux checksums
+        if: matrix.platform == 'ubuntu-22.04'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh release upload "${{ needs.check-version.outputs.tag }}"
+          src-tauri/target/release/bundle/SHA256SUMS-linux-x86_64.txt
+          --repo "${{ github.repository }}" --clobber
 
       - name: Validate packaged macOS application
         if: matrix.platform == 'macos-latest'

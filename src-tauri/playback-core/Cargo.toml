@@ -1,0 +1,21 @@
+[package]
+name = "apogee-playback-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+
+[dependencies]
+broadcast-common = { version = "=9.3.0", default-features = false }
+hls-runtime = { version = "=0.6.0", default-features = false }
+transmux = { version = "=0.24.1", default-features = false }
+container-probe = { version = "=0.1.0", default-features = false }
+symphonia = { version = "=0.6.1", default-features = false, features = ["aac", "mp3"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+rubato = "=5.0.0"
+rtrb = "=0.4.0"
+rustfft = "=6.4.1"
+
+
+[dev-dependencies]
+serde_json = "=1.0.151"

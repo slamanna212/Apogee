@@ -1,6 +1,5 @@
 use std::{
     path::{Path, PathBuf},
-    sync::LazyLock,
     time::{Duration, SystemTime},
 };
 
@@ -8,19 +7,7 @@ use tauri::{Emitter, Manager};
 
 const TUNE_EVENT: &str = "notification-tune";
 const TUNE_ACTION: &str = "tune";
-const MAX_ARTWORK_BYTES: usize = 3 * 1024 * 1024;
 const ARTWORK_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
-
-// One shared client for artwork fetches (connection pool + keep-alive) instead
-// of rebuilding a Client - and a new TLS handshake - per cache miss. Falls back
-// to a default client if the configured builder ever fails to initialize.
-static ARTWORK_HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(3))
-        .user_agent("Apogee notification artwork")
-        .build()
-        .unwrap_or_default()
-});
 
 fn artwork_extension(content_type: Option<&str>, path: &str) -> Option<&'static str> {
     let mime = content_type
@@ -44,14 +31,6 @@ fn artwork_extension(content_type: Option<&str>, path: &str) -> Option<&'static 
         "gif" => Some("gif"),
         _ => None,
     }
-}
-
-fn append_artwork_chunk(bytes: &mut Vec<u8>, chunk: &[u8]) -> bool {
-    if bytes.len().saturating_add(chunk.len()) > MAX_ARTWORK_BYTES {
-        return false;
-    }
-    bytes.extend_from_slice(chunk);
-    true
 }
 
 fn cached_path(cache_dir: &Path, url: &str, extension: &str) -> PathBuf {
@@ -109,52 +88,31 @@ async fn cache_artwork(app: &tauri::AppHandle, artwork_url: Option<&str>) -> Opt
         }
     }
 
-    let mut response = match ARTWORK_HTTP
-        .get(url)
-        .send()
+    // Shared NetworkService: its artwork profile already bounds both the deadline and the
+    // body size, so the manual chunk loop that used to live here is gone.
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let response = match crate::network::NetworkService::shared()
+        .fetch_artwork(url.as_str(), &cancel)
         .await
-        .and_then(|response| response.error_for_status())
     {
         Ok(response) => response,
         Err(error) => {
-            log::warn!("could not download notification artwork: {error}");
+            log::warn!(
+                "could not download notification artwork: {}",
+                crate::network::redact_text(&error.to_string())
+            );
             return None;
         }
     };
-    if response
-        .content_length()
-        .is_some_and(|length| length > MAX_ARTWORK_BYTES as u64)
-    {
-        log::warn!("notification artwork exceeded the size limit");
-        return None;
-    }
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok());
-    let extension = match artwork_extension(content_type, response.url().path()) {
-        Some(extension) => extension,
-        None => {
-            log::warn!("notification artwork had an unsupported image type");
-            return None;
-        }
-    };
-
-    let mut bytes = Vec::new();
-    loop {
-        match response.chunk().await {
-            Ok(Some(chunk)) if append_artwork_chunk(&mut bytes, &chunk) => {}
-            Ok(Some(_)) => {
-                log::warn!("notification artwork exceeded the size limit");
+    let extension =
+        match artwork_extension(response.content_type.as_deref(), response.final_url.path()) {
+            Some(extension) => extension,
+            None => {
+                log::warn!("notification artwork had an unsupported image type");
                 return None;
             }
-            Ok(None) => break,
-            Err(error) => {
-                log::warn!("could not read notification artwork: {error}");
-                return None;
-            }
-        }
-    }
+        };
+    let bytes = response.bytes;
     if bytes.is_empty() {
         return None;
     }
@@ -326,10 +284,16 @@ mod tests {
     }
 
     #[test]
-    fn enforces_artwork_size_limit_incrementally() {
-        let mut bytes = vec![0; MAX_ARTWORK_BYTES - 2];
-        assert!(append_artwork_chunk(&mut bytes, &[1, 2]));
-        assert!(!append_artwork_chunk(&mut bytes, &[3]));
+    fn artwork_downloads_stay_capped_at_the_historical_limit() {
+        // The incremental cap used to live in this file. It now belongs to the shared
+        // NetworkService's artwork profile, so this guards against that move silently
+        // loosening the ceiling.
+        let config = crate::network::NetworkServiceConfig::default();
+        assert_eq!(
+            config.artwork_max_body_bytes,
+            3 * 1024 * 1024,
+            "notification artwork must stay capped at 3 MiB"
+        );
     }
 
     #[test]

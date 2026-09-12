@@ -1,19 +1,16 @@
-import { invoke } from '@tauri-apps/api/core';
+import { setVisualizer } from './playerClient';
 
-// Points the audio-spectrum visualizer at a specific output device so it
-// captures the same audio mpv is playing. Pass `null`/`null` for the system
-// default. `name` is mpv's `audio-device-list` name; `description` is the
-// friendly label (used to match the device on Windows).
-export function setWaveformDevice(
-  name: string | null,
-  description: string | null,
-): Promise<void> {
-  return invoke('waveform_set_device', { name, description });
-}
-
-// Gates the backend FFT/emit pipeline on whether playback is active - while
-// stopped the visualizer ignores captured levels anyway, so this stops the
-// ~43x/sec FFT + event emit from running on silence.
+// Gates the spectrum visualizer.
+//
+// This used to capture system audio through a loopback device so it could
+// analyse whatever mpv was playing. The Symphonia/CPAL engine instead taps the
+// PCM Apogee itself is about to hand the output device, post-EQ and post-volume,
+// so the display reflects this app's output rather than everything the machine is
+// playing - and no microphone or system-audio permission is involved.
+//
+// The backend emits the same `waveform-levels` event with the same 8-band
+// payload, so `Waveform.tsx` is unchanged. Analysis is skipped entirely while
+// this is off, so a hidden visualizer costs nothing.
 export function setWaveformActive(active: boolean): Promise<void> {
-  return invoke('waveform_set_active', { active });
+  return setVisualizer(active);
 }

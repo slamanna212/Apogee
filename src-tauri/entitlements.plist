@@ -3,13 +3,15 @@
 <plist version="1.0">
 <dict>
   <!-- Intentionally empty. Apogee is NOT sandboxed
-       (com.apple.security.app-sandbox is deliberately omitted): sandboxing
-       would break Homebrew mpv discovery/exec in mpv.rs's resolve_mpv_path()
-       and spawn_mpv(). No keychain-access-group entry is needed either -
-       that entitlement only matters to sandboxed apps; secrets.rs's plain
-       keyring::Entry usage relies on the code signature itself for Keychain
-       ACLs. Hardened runtime is applied via tauri.conf.json's
-       bundle.macOS.hardenedRuntime + a signing identity supplied at build
-       time, independent of this file's contents. -->
+       (com.apple.security.app-sandbox is deliberately omitted). Audio is now
+       decoded in-process and played through CoreAudio via CPAL, so there is no
+       longer any subprocess to discover or exec, and no system-audio capture -
+       the spectrum visualizer taps Apogee's own PCM, so no microphone or
+       audio-input entitlement is required either. No keychain-access-group
+       entry is needed: that entitlement only matters to sandboxed apps;
+       secrets.rs's plain keyring::Entry usage relies on the code signature
+       itself for Keychain ACLs. Hardened runtime is applied via
+       tauri.conf.json's bundle.macOS.hardenedRuntime + a signing identity
+       supplied at build time, independent of this file's contents. -->
 </dict>
 </plist>

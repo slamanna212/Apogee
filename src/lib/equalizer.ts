@@ -1,6 +1,6 @@
 export const EQUALIZER_BANDS = [31, 62, 125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000] as const;
 
-export type EqualizerPreset = 'flat' | 'bass-boost' | 'treble-boost' | 'vocal' | 'rock' | 'pop' | 'custom';
+export type EqualizerPreset = 'flat' | 'bass-boost' | 'treble-boost' | 'vocal' | 'rock' | 'pop' | 'edm' | 'country' | 'custom';
 
 export interface EqualizerSettings {
   enabled: boolean;
@@ -15,6 +15,8 @@ export const EQUALIZER_PRESETS: Record<Exclude<EqualizerPreset, 'custom'>, reado
   vocal: [-2, -2, -1, 0, 2, 4, 4, 2, 0, -1],
   rock: [4, 3, 1, -1, -2, 1, 3, 4, 4, 3],
   pop: [-1, 1, 3, 4, 2, 0, -1, -1, 1, 2],
+  edm: [8, 6, 3, -1, -3, -3, -1, 3, 5, 6],
+  country: [2, 2, 1, 0, 1, 2, 3, 3, 2, 1],
 };
 
 export const DEFAULT_EQUALIZER: EqualizerSettings = {

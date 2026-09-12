@@ -27,11 +27,10 @@ What actually happened.
 
 - Apogee version:
 - OS/Platform:
-- `mpv` version (`mpv --version`):
 
 ## Logs
 
-Paste any relevant logs (app console, `mpv` output, etc.) here.
+Paste any relevant logs (app console, or the exported log from Settings) here.
 
 ```
 paste logs here

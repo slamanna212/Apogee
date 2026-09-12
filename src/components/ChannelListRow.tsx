@@ -1,5 +1,5 @@
 import { memo, useState } from 'react';
-import { Text, useComputedColorScheme } from '@mantine/core';
+import { Badge, Text, useComputedColorScheme } from '@mantine/core';
 import { IconInfoCircle, IconPlayerPlayFilled } from '@tabler/icons-react';
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel, StellarStation } from '../types/stellarTunerLog';
@@ -7,6 +7,8 @@ import { CutTypeBadge } from './CutTypeBadge';
 import { ChannelActionsMenu } from './ChannelActionsMenu';
 import { ChannelArtwork } from './ChannelArtwork';
 import { pickChannelLogoUrl } from '../lib/channelLogo';
+import { channelDisplayName, channelDisplayNumber, isChannelUnmatched } from '../lib/channelDisplay';
+import { useChannelStore } from '../stores/channelStore';
 
 interface ChannelListRowProps {
   channel: XtreamChannel;
@@ -33,8 +35,10 @@ function ChannelListRowImpl({
   const [actionHovered, setActionHovered] = useState(false);
   const showPlayButton = hovered && !actionHovered;
   const colorScheme = useComputedColorScheme('dark');
-  const name = metadata?.marketing_name || channel.name;
-  const number = metadata?.channel_number ?? channel.num;
+  const metadataStatus = useChannelStore((s) => s.metadataStatus);
+  const unmatched = isChannelUnmatched(metadata, metadataStatus);
+  const name = channelDisplayName(channel, metadata);
+  const number = channelDisplayNumber(channel, metadata);
   const logoUrl = pickChannelLogoUrl(metadata?.logos, colorScheme) || channel.stream_icon;
   const artworkUrl = nowPlaying?.artwork_url;
   const trackTitle = nowPlaying?.title;
@@ -108,6 +112,16 @@ function ChannelListRowImpl({
         >
           {name}
         </Text>
+        {unmatched && (
+          <Badge
+            color="red"
+            size="xs"
+            variant="filled"
+            title="No StellarTunerLog match for this channel name - see Settings > Diagnostics"
+          >
+            Unmatched
+          </Badge>
+        )}
       </div>
       <div style={{ width: 48, flex: 'none', textAlign: 'center', font: '800 26px "Space Grotesk", sans-serif', color: 'var(--app-dim)' }}>
         {number}

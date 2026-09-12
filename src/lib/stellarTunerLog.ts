@@ -1,4 +1,4 @@
-import { fetchWithTimeout as fetch } from './fetchWithTimeout';
+import { invoke } from '@tauri-apps/api/core';
 import type {
   StellarChannel,
   StellarChannelsResponse,
@@ -7,37 +7,32 @@ import type {
   StellarNowPlayingResponse,
 } from '../types/stellarTunerLog';
 
-const NOWPLAYING_URL = 'https://api.stellartunerlog.com/v1/nowplaying';
-const CHANNELS_URL = 'https://api.stellartunerlog.com/v1/channels';
-const historyUrl = (channelId: string) => `https://api.stellartunerlog.com/v1/history/${channelId}`;
+/**
+ * StellarTunerLog calls run in Rust (`src-tauri/src/stellar.rs`) so all application HTTP
+ * shares one client. The published API requires a key for all endpoints; Rust supplies
+ * the bundled key for the channel catalog and uses the supplied key for other calls.
+ */
 
 /**
  * pri.art.prod.streaming.siriusxm.com's TLS cert doesn't cover its own hostname
  * (the Akamai edge falls back to a generic a248.e.akamai.net cert), so https
  * loads fail cert validation in the webview - http to the same host works fine.
+ *
+ * Applied here rather than in Rust because these URLs are consumed by <img> tags in the
+ * webview, which is what performs the failing TLS handshake.
  */
 function downgradeSiriusCdnUrl(url: string): string {
   return url.replace(/^https:\/\/(pri\.art\.prod\.streaming\.siriusxm\.com\/)/, 'http://$1');
 }
 
-/** No API key required for /nowplaying - only /history checks it. */
-export async function getNowPlaying(apiKey?: string): Promise<StellarNowPlayingResponse> {
-  const res = await fetch(NOWPLAYING_URL, {
-    headers: apiKey ? { 'X-API-Key': apiKey } : undefined,
-  });
-  if (!res.ok) {
-    throw new Error(`StellarTunerLog /nowplaying failed: HTTP ${res.status}`);
-  }
-  return res.json();
+/** Supply the bundled API key for the documented subscriber endpoint. */
+export function getNowPlaying(apiKey?: string): Promise<StellarNowPlayingResponse> {
+  return invoke('stellar_now_playing', { apiKey: apiKey ?? null });
 }
 
-/** No API key required for /channels either - only /history checks it. */
+/** Rust attaches the bundled API key to the catalog request. */
 export async function getChannels(): Promise<StellarChannel[]> {
-  const res = await fetch(CHANNELS_URL);
-  if (!res.ok) {
-    throw new Error(`StellarTunerLog /channels failed: HTTP ${res.status}`);
-  }
-  const data: StellarChannelsResponse = await res.json();
+  const data: StellarChannelsResponse = await invoke('stellar_channels');
   const channels = Array.isArray(data.channels) ? data.channels : Object.values(data.channels);
   for (const channel of channels) {
     if (!channel.logos) continue;
@@ -55,12 +50,6 @@ export async function getChannels(): Promise<StellarChannel[]> {
  * callers.
  */
 export async function getHistory(channelId: string, apiKey: string): Promise<StellarHistoryEntry[]> {
-  const res = await fetch(historyUrl(channelId), {
-    headers: { 'X-API-Key': apiKey },
-  });
-  if (!res.ok) {
-    throw new Error(`StellarTunerLog /history failed: HTTP ${res.status}`);
-  }
-  const data: StellarHistoryResponse = await res.json();
+  const data: StellarHistoryResponse = await invoke('stellar_history', { channelId, apiKey });
   return data.plays;
 }

@@ -3,27 +3,12 @@ import { IconInfoSmall, IconPlayerPlayFilled } from '@tabler/icons-react';
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel, StellarStation } from '../types/stellarTunerLog';
 import { ChannelActionsMenu } from './ChannelActionsMenu';
+import { channelDisplayName, channelDisplayNumber, isChannelUnmatched } from '../lib/channelDisplay';
+import { hashGradient } from '../lib/channelGradient';
+import { useChannelStore } from '../stores/channelStore';
 
 export const CHANNEL_CARD_MIN_WIDTH = 180;
 export const CHANNEL_CARD_GAP = 22;
-
-export const GRADIENTS: [string, string][] = [
-  ['#ff7a5c', '#8b6bff'],
-  ['#45e0d8', '#5c7cfa'],
-  ['#f76707', '#f06595'],
-  ['#12b886', '#339af0'],
-  ['#5c7cfa', '#8b6bff'],
-  ['#9775fa', '#f06595'],
-  ['#fcc419', '#f76707'],
-  ['#339af0', '#12b886'],
-];
-
-export function hashGradient(seed: string): string {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0;
-  const [a, b] = GRADIENTS[Math.abs(hash) % GRADIENTS.length];
-  return `linear-gradient(150deg, ${a}, ${b})`;
-}
 
 interface ChannelCardProps {
   channel: XtreamChannel;
@@ -40,8 +25,10 @@ function ChannelCardImpl({ channel, metadata, isFavorite, isPlaying, onToggleFav
   const [hovered, setHovered] = useState(false);
   const [actionHovered, setActionHovered] = useState(false);
   const showPlayButton = hovered && !actionHovered;
-  const name = metadata?.marketing_name || channel.name;
-  const number = metadata?.channel_number ?? channel.num;
+  const metadataStatus = useChannelStore((s) => s.metadataStatus);
+  const unmatched = isChannelUnmatched(metadata, metadataStatus);
+  const name = channelDisplayName(channel, metadata);
+  const number = channelDisplayNumber(channel, metadata);
   const logoUrl = metadata?.logos?.color_dark_square?.url || channel.stream_icon;
   const fallbackGradient = useMemo(() => hashGradient(channel.name), [channel.name]);
   const background = metadata?.dark_bg_color || fallbackGradient;
@@ -202,6 +189,26 @@ function ChannelCardImpl({ channel, metadata, isFavorite, isPlaying, onToggleFav
       >
         <IconPlayerPlayFilled size={20} />
       </div>
+      {unmatched && (
+        <span
+          title="No StellarTunerLog match for this channel name - see Settings > Diagnostics"
+          style={{
+            position: 'absolute',
+            bottom: 10,
+            left: 10,
+            padding: '2px 7px',
+            borderRadius: 999,
+            background: 'var(--mantine-color-red-9, #a51111)',
+            color: '#fff',
+            font: '600 10px "Sora", sans-serif',
+            letterSpacing: 0.4,
+            textTransform: 'uppercase',
+            zIndex: 1,
+          }}
+        >
+          Unmatched
+        </span>
+      )}
       <div
         onClick={(e) => {
           e.stopPropagation();

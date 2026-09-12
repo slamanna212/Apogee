@@ -1,10 +1,11 @@
 import { memo, useMemo } from 'react';
 import { Text } from '@mantine/core';
 import { useChannelStore } from '../stores/channelStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { useLibraryStore } from '../stores/libraryStore';
 import { usePlayerStore } from '../stores/playerStore';
 import { ChannelCard, CHANNEL_CARD_MIN_WIDTH, CHANNEL_CARD_GAP } from '../components/ChannelCard';
-import { buildRecommendationRows, getAllGenres, rankPersonalizedGenres, shuffleGenres } from '../lib/recommendations';
+import { HOME_PAGE_SIZES, buildRecommendationRows, getAllGenres, rankPersonalizedGenres, shuffleGenres } from '../lib/recommendations';
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel, StellarStation } from '../types/stellarTunerLog';
 
@@ -63,6 +64,9 @@ export function Home({ onSelectChannel, onPlayChannel }: HomeProps) {
   const toggleFavorite = useLibraryStore((s) => s.toggleFavorite);
   const currentChannelId = usePlayerStore((s) => s.currentChannel?.stream_id);
 
+  const homePageSize = useSettingsStore((s) => s.settings.homePageSize);
+  const { maxRows, channelsPerRow, recentCount } = HOME_PAGE_SIZES[homePageSize];
+
   const favoriteSet = useMemo(() => new Set(favorites), [favorites]);
 
   const recentChannels = useMemo(
@@ -74,7 +78,7 @@ export function Home({ onSelectChannel, onPlayChannel }: HomeProps) {
   );
 
   // Stable array identity so the memoized Row isn't re-rendered every tick.
-  const topRecent = useMemo(() => recentChannels.slice(0, 10), [recentChannels]);
+  const topRecent = useMemo(() => recentChannels.slice(0, recentCount), [recentChannels, recentCount]);
 
   const personalizedGenres = useMemo(
     () => rankPersonalizedGenres(channelMetadata, recentlyPlayed, favorites),
@@ -87,8 +91,8 @@ export function Home({ onSelectChannel, onPlayChannel }: HomeProps) {
   );
 
   const recommendationRows = useMemo(
-    () => buildRecommendationRows(personalizedGenres, shuffledFillerGenres, channels, channelMetadata, recentlyPlayed),
-    [personalizedGenres, shuffledFillerGenres, channels, channelMetadata, recentlyPlayed],
+    () => buildRecommendationRows(personalizedGenres, shuffledFillerGenres, channels, channelMetadata, recentlyPlayed, maxRows, channelsPerRow),
+    [personalizedGenres, shuffledFillerGenres, channels, channelMetadata, recentlyPlayed, maxRows, channelsPerRow],
   );
 
   return (

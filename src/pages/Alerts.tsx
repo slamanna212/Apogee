@@ -204,6 +204,9 @@ export function Alerts({ onPlayChannel }: AlertsProps) {
   useEffect(() => {
     if (initializedTabRef.current || entries.length === 0) return;
     initializedTabRef.current = true;
+    // One-time initial tab pick once follow entries first load async from the store;
+    // not a derived value, so this legitimately needs an effect rather than render-time logic.
+    // oxlint-disable-next-line react/set-state-in-effect
     if (trackEntries.length === 0 && artistEntries.length > 0) setFollowTab('artists');
   }, [entries.length, trackEntries.length, artistEntries.length]);
 

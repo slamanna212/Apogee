@@ -11,13 +11,15 @@
       "label": "setup: fetch cargo dependencies (src-tauri)",
       "type": "shell",
       "command": "cargo fetch",
-      "options": { "cwd": "${workspaceFolder}/src-tauri" },
+      "options": {
+        "cwd": "${workspaceFolder}/src-tauri"
+      },
       "problemMatcher": []
     },
     {
-      "label": "setup: verify mpv is on PATH",
+      "label": "setup: verify ALSA development headers are installed",
       "type": "shell",
-      "command": "mpv --version || (echo 'mpv not found on PATH — install it via your package manager (e.g. sudo apt install mpv) before running the app' && exit 1)",
+      "command": "pkg-config --exists alsa || (echo 'ALSA development headers not found - install them before building (e.g. sudo apt install libasound2-dev). End users need only the runtime library, not this package.' && exit 1)",
       "problemMatcher": []
     },
     {
@@ -26,7 +28,7 @@
       "dependsOn": [
         "setup: install npm dependencies",
         "setup: fetch cargo dependencies (src-tauri)",
-        "setup: verify mpv is on PATH"
+        "setup: verify ALSA development headers are installed"
       ],
       "problemMatcher": []
     },
@@ -34,7 +36,10 @@
       "label": "dev",
       "type": "shell",
       "command": "npm run tauri dev",
-      "group": { "kind": "build", "isDefault": true },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
       "problemMatcher": []
     },
     {
@@ -56,15 +61,21 @@
       "type": "shell",
       "command": "npx tsc --noEmit",
       "group": "test",
-      "problemMatcher": ["$tsc"]
+      "problemMatcher": [
+        "$tsc"
+      ]
     },
     {
       "label": "cargo check (src-tauri)",
       "type": "shell",
       "command": "cargo check",
-      "options": { "cwd": "${workspaceFolder}/src-tauri" },
+      "options": {
+        "cwd": "${workspaceFolder}/src-tauri"
+      },
       "group": "test",
-      "problemMatcher": ["$rustc"]
+      "problemMatcher": [
+        "$rustc"
+      ]
     }
   ]
 }

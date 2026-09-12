@@ -1,8 +1,8 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { useComputedColorScheme } from '@mantine/core';
 import type { StellarChannel } from '../types/stellarTunerLog';
 import { pickChannelLogoUrl } from '../lib/channelLogo';
-import { hashGradient } from './ChannelCard';
+import { hashGradient } from '../lib/channelGradient';
 
 interface ChannelArtworkProps {
   channelName: string;
@@ -23,21 +23,19 @@ interface ChannelArtworkProps {
  */
 export function ChannelArtwork({ channelName, streamIcon, metadata, artworkUrl, size, radius, onClick, style }: ChannelArtworkProps) {
   const colorScheme = useComputedColorScheme('dark');
-  const [artFailed, setArtFailed] = useState(false);
-  const [logoFailed, setLogoFailed] = useState(false);
-
-  useEffect(() => setArtFailed(false), [artworkUrl]);
+  const [failedArtUrl, setFailedArtUrl] = useState<string>();
+  const [failedLogoUrl, setFailedLogoUrl] = useState<string>();
 
   const logoUrl = pickChannelLogoUrl(metadata?.logos, colorScheme) || streamIcon;
-  useEffect(() => setLogoFailed(false), [logoUrl]);
 
-  if (artworkUrl && !artFailed) {
+  if (artworkUrl && artworkUrl !== failedArtUrl) {
     return (
       <img
+        key={artworkUrl}
         src={artworkUrl}
         alt=""
         onClick={onClick}
-        onError={() => setArtFailed(true)}
+        onError={() => setFailedArtUrl(artworkUrl)}
         style={{
           width: size,
           height: size,
@@ -73,11 +71,12 @@ export function ChannelArtwork({ channelName, streamIcon, metadata, artworkUrl, 
         ...style,
       }}
     >
-      {logoUrl && !logoFailed && (
+      {logoUrl && logoUrl !== failedLogoUrl && (
         <img
+          key={logoUrl}
           src={logoUrl}
           alt=""
-          onError={() => setLogoFailed(true)}
+          onError={() => setFailedLogoUrl(logoUrl)}
           style={{ width: '65%', height: '65%', objectFit: 'contain' }}
         />
       )}

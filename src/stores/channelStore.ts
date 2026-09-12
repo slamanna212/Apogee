@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { debug as logDebug, warn as logWarn } from '@tauri-apps/plugin-log';
 import { load, type Store } from '@tauri-apps/plugin-store';
 import type { XtreamChannel } from '../types/xtream';
 import type { StellarChannel, StellarStation } from '../types/stellarTunerLog';
@@ -7,13 +8,17 @@ import { getChannels, getNowPlaying } from '../lib/stellarTunerLog';
 import { buildChannelMetadataMap, buildNowPlayingMap, nowPlayingMapsEqual } from '../lib/channelMatcher';
 
 const POLL_INTERVAL_MS = 10_000;
-const MAX_POLL_INTERVAL_MS = 2 * 60_000;
+const MAX_POLL_INTERVAL_MS = 30_000;
 
 /** Exponential backoff (capped) on consecutive StellarTunerLog poll failures, reset to the base interval on the next success. */
-export function nextPollDelayMs(failureCount: number): number {
-  if (failureCount <= 0) return POLL_INTERVAL_MS;
-  return Math.min(POLL_INTERVAL_MS * 2 ** failureCount, MAX_POLL_INTERVAL_MS);
+export function nextPollDelayMs(failureCount: number, elapsedMs = 0): number {
+  // Healthy polls run start-to-start. A single failure doesn't impose an extra
+  // backoff, and sustained failures still get a recovery attempt every 30s.
+  if (failureCount <= 0) return Math.max(1000, POLL_INTERVAL_MS - elapsedMs);
+  return Math.min(POLL_INTERVAL_MS * 2 ** (failureCount - 1), MAX_POLL_INTERVAL_MS);
 }
+
+let pollRevision = 0;
 
 // Persist across channel-list/category changes for the lifetime of the app -
 // stale entries for stream_ids no longer in `channels` are simply never read.
@@ -89,21 +94,28 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
     }
   },
   async pollNowPlaying(apiKey) {
-    const { channels, nowPlaying } = get();
-    if (channels.length === 0) return;
+    if (get().channels.length === 0) return;
+    const revision = ++pollRevision;
     try {
       const response = await getNowPlaying(apiKey);
+      if (revision !== pollRevision) return;
+      const { channels, nowPlaying } = get();
       const stations = Object.values(response.stations);
       const next = buildNowPlayingMap(channels, stations, stationIdCache, nowPlaying);
+      const changed = !nowPlayingMapsEqual(nowPlaying, next);
       set({
-        nowPlaying: nowPlayingMapsEqual(nowPlaying, next) ? nowPlaying : next,
+        nowPlaying: changed ? next : nowPlaying,
         pollFailureCount: 0,
       });
-    } catch {
+      void logDebug(`Stellar now-playing applied: updated_utc=${response.updated_utc}; stations=${stations.length}; provider_channels=${channels.length}; matched_channels=${next.size}; changed=${changed}`).catch(() => {});
+    } catch (err) {
+      if (revision !== pollRevision) return;
       // transient poll failure - keep showing the last known now-playing data,
       // but track it so the caller can back off instead of polling at a fixed
       // rate through an outage
       set((s) => ({ pollFailureCount: s.pollFailureCount + 1 }));
+      const message = err instanceof Error ? err.message : String(err);
+      void logWarn(`Stellar now-playing poll failed: ${message} (${get().pollFailureCount} consecutive failures); retaining previous metadata`).catch(() => {});
     }
   },
   async fetchChannelMetadata() {

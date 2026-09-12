@@ -19,7 +19,12 @@ import { useAlertsStore } from './stores/alertsStore';
 import { useScrobblingStore } from './stores/scrobblingStore';
 import { useSleepTimerStore } from './stores/sleepTimerStore';
 import { setMediaMetadata } from './lib/mediaSession';
-import { setWaveformDevice } from './lib/waveform';
+import {
+  setDevice as setPlayerDevice,
+  setBuffering as setPlayerBuffering,
+  setVolume as setPlayerVolume,
+  setEqualizer as setPlayerEqualizer,
+} from './lib/playerClient';
 import {
   discordRpcConnect,
   discordRpcDisconnect,
@@ -222,6 +227,12 @@ function AppContent() {
   const [browserOpen, setBrowserOpen] = useState(true);
   const [barMode, setBarMode] = useState<BarMode>('expanded');
   const [page, setPage] = useState<Page>('home');
+  const startupPageApplied = useRef(false);
+  useEffect(() => {
+    if (!settingsLoaded || startupPageApplied.current) return;
+    startupPageApplied.current = true;
+    setPage(settings.startupPage);
+  }, [settingsLoaded, settings.startupPage]);
   const [modalStreamId, setModalStreamId] = useState<number | null>(null);
   const [compact, setCompact] = useState(false);
 
@@ -312,13 +323,22 @@ function AppContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsLoaded]);
 
-  // Point the visualizer at the saved output device from launch (its capture
-  // runs independently of playback). Changes made in Settings apply themselves;
-  // this only restores the persisted choice on startup.
+  // The visualizer no longer needs pointing at a device: it taps the engine's own
+  // output, so it follows whichever device playback is using automatically.
+
+  // Restore persisted output settings on the player engine itself. Unlike the
+  // old mpv subprocess (reconfigured on every connect), the Symphonia/CPAL
+  // engine's output stage is long-lived, so these are pushed once at startup
+  // rather than per playback attempt (see src/stores/playerStore.ts). A
+  // legacy MPV device selection was already migrated (to system default, with
+  // an explanation surfaced in Settings) by settingsStore.load() before
+  // settingsLoaded flips true - see src/stores/settingsStore.ts.
   useEffect(() => {
     if (settingsLoaded) {
-      const device = settings.audioDevice;
-      void setWaveformDevice(device?.name ?? null, device?.description ?? null);
+      void setPlayerBuffering(settings.audioBuffer);
+      void setPlayerDevice(settings.audioDevice?.id ?? null);
+      void setPlayerVolume(settings.volume);
+      void setPlayerEqualizer(settings.equalizer.enabled, settings.equalizer.gains);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsLoaded]);
@@ -333,13 +353,12 @@ function AppContent() {
   }, [settingsLoaded, settings.discordRpcEnabled]);
 
   useEffect(() => {
-    if (!settingsLoaded) return;
+    if (!settingsLoaded || !settings.checkUpdatesOnStartup) return;
     const timer = setTimeout(() => {
       void useUpdateStore.getState().checkForUpdates(settings.updateChannel);
     }, 5000);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settingsLoaded]);
+  }, [settingsLoaded, settings.checkUpdatesOnStartup, settings.updateChannel]);
 
   useEffect(() => {
     if (settingsLoaded && settings.baseUrl && settings.username && settings.categoryIds.length > 0) {
@@ -356,11 +375,12 @@ function AppContent() {
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     async function tick() {
+      const startedAt = performance.now();
       await pollNowPlaying(stellarApiKey);
       if (cancelled) return;
       // Reschedule using the failure count pollNowPlaying just updated, so a
       // StellarTunerLog outage backs off instead of polling at a fixed rate.
-      const delay = nextPollDelayMs(useChannelStore.getState().pollFailureCount);
+      const delay = nextPollDelayMs(useChannelStore.getState().pollFailureCount, performance.now() - startedAt);
       timer = setTimeout(tick, delay);
     }
 
@@ -642,11 +662,17 @@ function AppContent() {
                   style={{
                     flex: 1,
                     background: 'radial-gradient(circle at 30% 0%, var(--app-accent-soft), transparent 55%), var(--app-bg2)',
-                    padding: '28px 32px',
-                    overflowY: 'auto',
+                    // Settings renders its own edge-to-edge category rail (see
+                    // src/pages/Settings.tsx) and manages its own internal scroll
+                    // region, so it opts out of the padding/scroll every other page
+                    // gets here - otherwise its rail wouldn't sit flush against this
+                    // sidebar's border like the design calls for.
+                    padding: page === 'settings' ? 0 : '28px 32px',
+                    overflowY: page === 'settings' ? 'hidden' : 'auto',
                     overflowX: 'hidden',
                     display: 'flex',
                     flexDirection: 'column',
+                    minHeight: 0,
                     color: 'var(--app-text)',
                   }}
                 >
@@ -713,6 +739,7 @@ function AppContent() {
 
       {modalChannel && (
         <ChannelModal
+          key={modalChannel.stream_id}
           channel={modalChannel}
           metadata={channelMetadata.get(modalChannel.stream_id)}
           apiKey={stellarApiKey}
