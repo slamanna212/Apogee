@@ -18,9 +18,9 @@
   "dependencies": {
     "@fontsource/sora": "5.3.0",
     "@fontsource/space-grotesk": "5.3.0",
-    "@mantine/core": "9.6.0",
-    "@mantine/hooks": "9.6.0",
-    "@mantine/notifications": "9.6.0",
+    "@mantine/core": "9.6.1",
+    "@mantine/hooks": "9.6.1",
+    "@mantine/notifications": "9.6.1",
     "@tabler/icons-react": "3.46.0",
     "@tanstack/react-virtual": "3.14.10",
     "@tauri-apps/api": "2.11.1",
