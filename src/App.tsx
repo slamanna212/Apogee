@@ -65,8 +65,8 @@ const COMPACT_BREAKPOINT = 900;
 const CARD_WIDTH = 1180;
 const CARD_HEIGHT = 760;
 const RAIL_SHADOW_GUTTER = 24;
-const EXPANDED_RAIL_SIZE = { width: 700, height: 84 };
-const COLLAPSED_RAIL_SIZE = { width: 300, height: 56 };
+const EXPANDED_RAIL_SIZE = { width: 560, height: 84 };
+const COLLAPSED_RAIL_SIZE = { width: 260, height: 56 };
 const EXPANDED_BAR_SIZE = {
   width: EXPANDED_RAIL_SIZE.width + RAIL_SHADOW_GUTTER * 2,
   height: EXPANDED_RAIL_SIZE.height + RAIL_SHADOW_GUTTER * 2,
@@ -213,6 +213,9 @@ function AppContent() {
   const muted = usePlayerStore((s) => s.muted);
   const errorMessage = usePlayerStore((s) => s.errorMessage);
   const isBuffering = usePlayerStore((s) => s.isBuffering);
+  // Only subscribed when the rail shows it, so bitrate updates don't re-render this shell otherwise.
+  const showBitrate = useSettingsStore((s) => s.settings.railShowBitrate);
+  const bitrateKbps = usePlayerStore((s) => (showBitrate ? s.bitrateKbps : null));
   const selectChannel = usePlayerStore((s) => s.selectChannel);
   const play = usePlayerStore((s) => s.play);
   const stop = usePlayerStore((s) => s.stop);
@@ -722,6 +725,7 @@ function AppContent() {
             onMinus={handleMinus}
             errorMessage={errorMessage}
             isBuffering={isBuffering}
+            bitrateKbps={bitrateKbps}
             onPlayStop={() => {
               const stopping = playerStatus === 'playing' || playerStatus === 'loading';
               if (stopping) useSleepTimerStore.getState().cancel();

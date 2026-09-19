@@ -1,3 +1,4 @@
+mod artwork;
 mod discord_rpc;
 mod lastfm;
 mod logs;
@@ -68,6 +69,7 @@ pub fn run() {
             playback::commands::player_migrate_device,
             playback::commands::player_set_visualizer,
             playback::commands::player_get_snapshot,
+            artwork::artwork_fetch,
             xtream::xtream_get_live_categories,
             xtream::xtream_get_live_streams,
             stellar::stellar_now_playing,

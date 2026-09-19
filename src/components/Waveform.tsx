@@ -12,6 +12,15 @@ interface WaveformProps {
   active: boolean;
   bands?: number;
   size?: 'md' | 'sm';
+  /** Two-stop tint across the bars, left to right. Any CSS colors, including var()
+   *  references, so a transitioned custom property crossfades the bars too. */
+  tint?: [string, string];
+}
+
+function barColor(tint: [string, string] | undefined, i: number, bands: number): string {
+  if (!tint) return 'var(--app-accent2)';
+  const t = bands > 1 ? i / (bands - 1) : 0;
+  return `color-mix(in srgb, ${tint[0]}, ${tint[1]} ${Math.round(t * 100)}%)`;
 }
 
 /**
@@ -29,7 +38,7 @@ interface WaveformProps {
  * waiting for levels during playback, a breathing animation fills the gap.
  * Stopped playback parks the bars at their baseline.
  */
-export function Waveform({ active, bands = 8, size = 'md' }: WaveformProps) {
+export function Waveform({ active, bands = 8, size = 'md', tint }: WaveformProps) {
   const barRefs = useRef<(HTMLDivElement | null)[]>([]);
   const realLevelsRef = useRef<number[] | null>(null);
   const lastRealAtRef = useRef(0);
@@ -147,7 +156,7 @@ export function Waveform({ active, bands = 8, size = 'md' }: WaveformProps) {
             flex: 'none',
             height: '100%',
             borderRadius: barWidth,
-            background: 'var(--app-accent2)',
+            background: barColor(tint, i, bands),
             transformOrigin: 'center',
             transform: `scaleY(${BASELINE})`,
           }}

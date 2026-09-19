@@ -5,6 +5,7 @@ import { SETTINGS_CATEGORIES, type SettingsCategoryId } from '../components/sett
 import type { SettingsResetHandle } from '../components/settings/types';
 import { ConnectionPanel } from '../components/settings/ConnectionPanel';
 import { AppearancePanel } from '../components/settings/AppearancePanel';
+import { PlaybackBarPanel } from '../components/settings/PlaybackBarPanel';
 import { AudioPanel } from '../components/settings/AudioPanel';
 import { DiscordPanel } from '../components/settings/DiscordPanel';
 import { ScrobblingPanel } from '../components/settings/ScrobblingPanel';
@@ -100,7 +101,7 @@ export function Settings() {
             onClick={() => setCategory(c.id)}
             onMouseEnter={() => setHoveredCategory(c.id)}
             onMouseLeave={() => setHoveredCategory((h) => (h === c.id ? null : h))}
-            style={railItemStyle(category === c.id, hoveredCategory === c.id)}
+            style={{ ...railItemStyle(category === c.id, hoveredCategory === c.id), marginLeft: c.nested ? 12 : 0 }}
           >
             {c.label}
           </div>
@@ -139,6 +140,7 @@ export function Settings() {
 
           {category === 'connection' && <ConnectionPanel onSaved={flashSaved} />}
           {category === 'appearance' && <AppearancePanel ref={resetHandleRef} onSaved={flashSaved} />}
+          {category === 'playbackBar' && <PlaybackBarPanel ref={resetHandleRef} onSaved={flashSaved} />}
           {category === 'audio' && <AudioPanel ref={resetHandleRef} onSaved={flashSaved} />}
           {category === 'discord' && <DiscordPanel ref={resetHandleRef} onSaved={flashSaved} />}
           {category === 'scrobbling' && <ScrobblingPanel ref={resetHandleRef} onSaved={flashSaved} />}

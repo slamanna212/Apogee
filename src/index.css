@@ -116,6 +116,21 @@ body,
   box-shadow: var(--app-shadow), inset 0 1px 0 var(--app-glass-highlight);
 }
 
+/* The rail's two-stop tint (see useArtworkTint). Registered so a track change can
+   transition the colors themselves instead of jumping; everything tinted inside the rail
+   (play button, glow, wash, visualizer bars) reads these through var(). */
+@property --rail-tint-a {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #8b6bff;
+}
+
+@property --rail-tint-b {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #45e0d8;
+}
+
 .apogee-transport-surface {
   position: relative;
   isolation: isolate;
@@ -126,7 +141,7 @@ body,
      transparent window's edge. Reads as the rail floating above whatever is
      beneath it rather than a shadow with a visible cutoff. */
   box-shadow: var(--app-shadow-rail), inset 0 1px 0 var(--app-glass-highlight);
-  transition: border-radius 180ms ease, box-shadow 180ms ease;
+  transition: border-radius 180ms ease, box-shadow 180ms ease, --rail-tint-a 400ms ease, --rail-tint-b 400ms ease;
 }
 
 .apogee-transport-surface::before {
@@ -136,8 +151,8 @@ body,
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(circle at 16% 0%, var(--app-accent-soft), transparent 38%),
-    radial-gradient(circle at 88% 110%, var(--app-accent2-soft), transparent 32%);
+    radial-gradient(circle at 16% 0%, color-mix(in srgb, var(--rail-tint-a) 18%, transparent), transparent 42%),
+    radial-gradient(circle at 88% 110%, color-mix(in srgb, var(--rail-tint-b) 15%, transparent), transparent 34%);
 }
 
 .apogee-transport-surface::after {

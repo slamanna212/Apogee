@@ -8,6 +8,7 @@ import { migrateDevice, setDevice, setBuffering } from '../lib/playerClient';
 export type UpdateChannel = 'stable' | 'beta';
 export type StartupPage = 'home' | 'channels' | 'favorites' | 'recent' | 'alerts';
 export type HomePageSize = 'small' | 'standard' | 'expanded';
+export type RailColorSource = 'artwork' | 'static';
 
 export interface ScrobblingSettings {
   lastfm: {
@@ -62,6 +63,15 @@ export interface Settings {
   audioDevice: AudioDeviceSelection | null;
   equalizer: EqualizerSettings;
   audioBuffer: AudioBufferSettings;
+  /** Settings → Playback Bar. */
+  railColorSource: RailColorSource;
+  railShowArtwork: boolean;
+  railShowVisualizer: boolean;
+  railShowCutType: boolean;
+  railShowBitrate: boolean;
+  railShowChannelLine: boolean;
+  railScrollTitles: boolean;
+  railScrollPeriodSeconds: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -85,7 +95,27 @@ export const DEFAULT_SETTINGS: Settings = {
   audioDevice: null,
   equalizer: DEFAULT_EQUALIZER,
   audioBuffer: DEFAULT_AUDIO_BUFFER,
+  railColorSource: 'artwork',
+  railShowArtwork: true,
+  railShowVisualizer: true,
+  railShowCutType: true,
+  railShowBitrate: false,
+  railShowChannelLine: true,
+  railScrollTitles: true,
+  railScrollPeriodSeconds: 8,
 };
+
+/** The subset of settings the Playback Bar page owns, used for its reset. */
+export const DEFAULT_RAIL_SETTINGS = {
+  railColorSource: DEFAULT_SETTINGS.railColorSource,
+  railShowArtwork: DEFAULT_SETTINGS.railShowArtwork,
+  railShowVisualizer: DEFAULT_SETTINGS.railShowVisualizer,
+  railShowCutType: DEFAULT_SETTINGS.railShowCutType,
+  railShowBitrate: DEFAULT_SETTINGS.railShowBitrate,
+  railShowChannelLine: DEFAULT_SETTINGS.railShowChannelLine,
+  railScrollTitles: DEFAULT_SETTINGS.railScrollTitles,
+  railScrollPeriodSeconds: DEFAULT_SETTINGS.railScrollPeriodSeconds,
+} satisfies Partial<Settings>;
 
 type PersistedSettings = Omit<Settings, 'password'>;
 

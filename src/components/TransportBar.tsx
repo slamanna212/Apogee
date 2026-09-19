@@ -8,6 +8,9 @@ import { CutTypeBadge } from './CutTypeBadge';
 import { ChannelActionsMenu } from './ChannelActionsMenu';
 import { ChannelArtwork } from './ChannelArtwork';
 import { Waveform } from './Waveform';
+import { MarqueeText } from './MarqueeText';
+import { useSettingsStore } from '../stores/settingsStore';
+import { useArtworkTint } from '../hooks/useArtworkTint';
 
 export type BarMode = 'expanded' | 'collapsed';
 
@@ -32,7 +35,56 @@ interface TransportBarProps {
   compactVolumePopover?: boolean;
   /** True when running as the standalone mini player window; the artwork expand modal looks wrong in that tiny window, so clicking artwork is disabled there. */
   isMiniPlayer?: boolean;
+  /** Average audio bitrate from the playback engine; the pill stays hidden until known. */
+  bitrateKbps?: number | null;
 }
+
+/** The Playback Bar settings the rail reads, pulled once here and passed down. */
+interface RailOptions {
+  showArtwork: boolean;
+  showVisualizer: boolean;
+  showCutType: boolean;
+  showBitrate: boolean;
+  showChannelLine: boolean;
+  scrollTitles: boolean;
+  scrollPeriodSeconds: number;
+}
+
+function useRailOptions(): RailOptions {
+  const showArtwork = useSettingsStore((s) => s.settings.railShowArtwork);
+  const showVisualizer = useSettingsStore((s) => s.settings.railShowVisualizer);
+  const showCutType = useSettingsStore((s) => s.settings.railShowCutType);
+  const showBitrate = useSettingsStore((s) => s.settings.railShowBitrate);
+  const showChannelLine = useSettingsStore((s) => s.settings.railShowChannelLine);
+  const scrollTitles = useSettingsStore((s) => s.settings.railScrollTitles);
+  const scrollPeriodSeconds = useSettingsStore((s) => s.settings.railScrollPeriodSeconds);
+  return { showArtwork, showVisualizer, showCutType, showBitrate, showChannelLine, scrollTitles, scrollPeriodSeconds };
+}
+
+/** Both rail tint stops, as published on the surface by TransportBar. */
+const RAIL_TINT: [string, string] = ['var(--rail-tint-a)', 'var(--rail-tint-b)'];
+
+const expandedTitleStyle: CSSProperties = {
+  font: '700 16px/22px "Space Grotesk", sans-serif',
+  color: 'var(--app-text)',
+};
+
+const expandedSubtitleStyle: CSSProperties = {
+  font: '400 13px/18px "Sora", sans-serif',
+  color: 'var(--app-dim)',
+};
+
+const bitratePillStyle: CSSProperties = {
+  flex: 'none',
+  borderRadius: 999,
+  padding: '5px 10px',
+  font: "700 11px 'Space Grotesk', sans-serif",
+  whiteSpace: 'nowrap',
+  // In dark mode these resolve to the spec'd rgba(255,255,255,.1) on rgba(246,245,251,.82);
+  // deriving them from --app-text keeps the pill readable in light mode too.
+  background: 'color-mix(in srgb, var(--app-text) 10%, transparent)',
+  color: 'color-mix(in srgb, var(--app-text) 82%, transparent)',
+};
 
 function PlusMinus({
   onPlus,
@@ -84,11 +136,13 @@ function PlayStopButton({
   onClick,
   disabled,
   size = 52,
+  glow = 24,
 }: {
   status: PlayerStatus;
   onClick: () => void;
   disabled?: boolean;
   size?: number;
+  glow?: number;
 }) {
   const isConnected = status === 'playing' || status === 'loading';
   return (
@@ -100,11 +154,11 @@ function PlayStopButton({
         width: size,
         height: size,
         borderRadius: '50%',
-        background: 'var(--app-accent)',
+        background: 'linear-gradient(135deg, var(--rail-tint-a), var(--rail-tint-b))',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        boxShadow: '0 0 24px var(--app-accent-soft)',
+        boxShadow: `0 0 ${glow}px color-mix(in srgb, var(--rail-tint-a) 35%, transparent)`,
         flex: 'none',
         cursor: disabled ? 'default' : 'pointer',
         opacity: disabled ? 0.5 : 1,
@@ -330,8 +384,8 @@ function VolumeControl({
           role="button"
           aria-label="Volume"
           style={{
-            width: 42,
-            height: 42,
+            width: 38,
+            height: 38,
             borderRadius: '50%',
             background: 'var(--app-panel2)',
             border: '1px solid var(--app-border)',
@@ -373,8 +427,8 @@ function VolumeControl({
 }
 
 const dotsButtonStyle: CSSProperties = {
-  width: 42,
-  height: 42,
+  width: 38,
+  height: 38,
   borderRadius: '50%',
   background: 'var(--app-panel2)',
   border: '1px solid var(--app-border)',
@@ -386,6 +440,10 @@ const dotsButtonStyle: CSSProperties = {
   color: 'var(--app-text)',
 };
 
+function ArtPlaceholder({ size, radius }: { size: number; radius: number }) {
+  return <div style={{ width: size, height: size, borderRadius: radius, background: 'var(--app-panel2)', flex: 'none' }} />;
+}
+
 function BarContent({
   status,
   currentChannel,
@@ -393,6 +451,7 @@ function BarContent({
   nowPlaying,
   errorMessage,
   onArtworkClick,
+  options,
 }: {
   status: PlayerStatus;
   currentChannel: XtreamChannel | null;
@@ -400,11 +459,12 @@ function BarContent({
   nowPlaying?: StellarStation;
   errorMessage?: string | null;
   onArtworkClick?: (artworkUrl: string) => void;
+  options: RailOptions;
 }) {
   if (!currentChannel) {
     return (
       <>
-        <div style={{ width: 65, height: 65, borderRadius: 5, background: 'var(--app-panel2)', flex: 'none' }} />
+        {options.showArtwork && <ArtPlaceholder size={56} radius={6} />}
         <Text data-tauri-drag-region size="sm" c="dimmed" style={{ flex: '1 1 auto', minWidth: 0 }}>
           Select a channel to start listening
         </Text>
@@ -415,32 +475,26 @@ function BarContent({
   if (status === 'loading') {
     return (
       <>
-        {currentChannel.stream_icon ? (
+        {options.showArtwork && (currentChannel.stream_icon ? (
           <img
             src={currentChannel.stream_icon}
             alt=""
-            style={{ width: 65, height: 65, borderRadius: 5, objectFit: 'cover', flex: 'none', background: 'var(--app-panel2)' }}
+            style={{ width: 56, height: 56, borderRadius: 6, objectFit: 'cover', flex: 'none', background: 'var(--app-panel2)' }}
           />
         ) : (
-          <div style={{ width: 65, height: 65, borderRadius: 5, background: 'var(--app-panel2)', flex: 'none' }} />
-        )}
+          <ArtPlaceholder size={56} radius={6} />
+        ))}
         <div data-tauri-drag-region style={{ flex: '1 1 auto', minWidth: 0 }}>
+          <MarqueeText
+            text={currentChannel.name}
+            textStyle={expandedTitleStyle}
+            enabled={options.scrollTitles}
+            periodSeconds={options.scrollPeriodSeconds}
+          />
           <div
             data-tauri-drag-region
             style={{
-              font: '700 16px "Space Grotesk", sans-serif',
-              color: 'var(--app-text)',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-          >
-            {currentChannel.name}
-          </div>
-          <div
-            data-tauri-drag-region
-            style={{
-              font: '400 13px "Sora", sans-serif',
+              font: '400 13px/18px "Sora", sans-serif',
               color: 'var(--app-dim)',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
@@ -459,9 +513,9 @@ function BarContent({
       <>
         <div
           style={{
-            width: 65,
-            height: 65,
-            borderRadius: 5,
+            width: 56,
+            height: 56,
+            borderRadius: 6,
             background: 'rgba(250,82,82,.12)',
             display: 'flex',
             alignItems: 'center',
@@ -486,47 +540,37 @@ function BarContent({
 
   return (
     <>
-      <ChannelArtwork
-        channelName={currentChannel.name}
-        streamIcon={currentChannel.stream_icon}
-        metadata={channelMetadata}
-        artworkUrl={artwork}
-        size={65}
-        radius={5}
-        onClick={onArtworkClick && artwork ? () => onArtworkClick(artwork) : undefined}
-      />
+      {options.showArtwork && (
+        <ChannelArtwork
+          channelName={currentChannel.name}
+          streamIcon={currentChannel.stream_icon}
+          metadata={channelMetadata}
+          artworkUrl={artwork}
+          size={56}
+          radius={6}
+          onClick={onArtworkClick && artwork ? () => onArtworkClick(artwork) : undefined}
+        />
+      )}
       <div data-tauri-drag-region style={{ flex: '1 1 auto', minWidth: 0 }}>
-        <div
-          data-tauri-drag-region
-          style={{
-            font: '700 16px "Space Grotesk", sans-serif',
-            color: 'var(--app-text)',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
-        >
-          {title}
-        </div>
+        <MarqueeText
+          text={title}
+          textStyle={expandedTitleStyle}
+          enabled={options.scrollTitles}
+          periodSeconds={options.scrollPeriodSeconds}
+        />
         {subtitleParts.length > 0 && (
-          <div
-            data-tauri-drag-region
-            style={{
-              font: '400 13px "Sora", sans-serif',
-              color: 'var(--app-dim)',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-          >
-            {subtitleParts.join(' — ')}
-          </div>
+          <MarqueeText
+            text={subtitleParts.join(' — ')}
+            textStyle={expandedSubtitleStyle}
+            enabled={options.scrollTitles}
+            periodSeconds={options.scrollPeriodSeconds}
+          />
         )}
-        {nowPlaying?.title && (
+        {options.showChannelLine && nowPlaying?.title && (
           <div
             data-tauri-drag-region
             style={{
-              font: '600 10px "Sora", sans-serif',
+              font: '600 10px/14px "Sora", sans-serif',
               color: 'var(--app-dim)',
               textTransform: 'uppercase',
               letterSpacing: '0.06em',
@@ -550,12 +594,14 @@ function CollapsedInfo({
   nowPlaying,
   errorMessage,
   isBuffering,
+  options,
 }: {
   status: PlayerStatus;
   currentChannel: XtreamChannel | null;
   nowPlaying?: StellarStation;
   errorMessage?: string | null;
   isBuffering?: boolean;
+  options: RailOptions;
 }) {
   if (!currentChannel) {
     return (
@@ -570,31 +616,24 @@ function CollapsedInfo({
 
   return (
     <div data-tauri-drag-region style={{ flex: '1 1 auto', maxWidth: 150, minWidth: 0 }} title={status === 'error' ? errorMessage ?? undefined : undefined}>
-      <div
-        data-tauri-drag-region
-        style={{
-          font: '700 12px "Space Grotesk", sans-serif',
+      <MarqueeText
+        text={title}
+        textStyle={{
+          font: '700 12px/16px "Space Grotesk", sans-serif',
           color: status === 'error' ? '#ff8787' : 'var(--app-text)',
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
         }}
-      >
-        {title}
-      </div>
+        enabled={options.scrollTitles && status !== 'error'}
+        periodSeconds={options.scrollPeriodSeconds}
+        size="sm"
+      />
       {subtitle && (
-        <div
-          data-tauri-drag-region
-          style={{
-            font: '400 10px "Sora", sans-serif',
-            color: 'var(--app-dim)',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
-        >
-          {subtitle}
-        </div>
+        <MarqueeText
+          text={subtitle}
+          textStyle={{ font: '400 10px/14px "Sora", sans-serif', color: 'var(--app-dim)' }}
+          enabled={options.scrollTitles}
+          periodSeconds={options.scrollPeriodSeconds}
+          size="sm"
+        />
       )}
     </div>
   );
@@ -619,8 +658,15 @@ export function TransportBar({
   onToggleMute,
   compactVolumePopover,
   isMiniPlayer,
+  bitrateKbps,
 }: TransportBarProps) {
   const [expandedArtwork, setExpandedArtwork] = useState<string | null>(null);
+  const options = useRailOptions();
+  const colorSource = useSettingsStore((s) => s.settings.railColorSource);
+  // Sample the art that is actually on screen: track art only once playback is showing it.
+  const shownArtwork = currentChannel && status !== 'loading' && status !== 'error' ? nowPlaying?.artwork_url : undefined;
+  const tint = useArtworkTint(shownArtwork, colorSource);
+  const tintVars = { '--rail-tint-a': tint[0], '--rail-tint-b': tint[1] } as CSSProperties;
 
   const artworkModal = (
     <Modal
@@ -651,9 +697,10 @@ export function TransportBar({
           className="apogee-glass apogee-transport-surface"
           data-tauri-drag-region
           style={{
+            ...tintVars,
             display: 'flex',
             alignItems: 'center',
-            gap: 10,
+            gap: 8,
             width: '100%',
             height: '100%',
             boxSizing: 'border-box',
@@ -662,25 +709,27 @@ export function TransportBar({
           }}
         >
           <PlusMinus onPlus={onPlus} onMinus={onMinus} compact />
-          <PlayStopButton status={status} onClick={onPlayStop} disabled={!currentChannel} size={36} />
-          {currentChannel ? (
+          <PlayStopButton status={status} onClick={onPlayStop} disabled={!currentChannel} size={36} glow={18} />
+          {options.showArtwork && (currentChannel ? (
             <ChannelArtwork
               channelName={currentChannel.name}
               streamIcon={currentChannel.stream_icon}
               metadata={channelMetadata}
               artworkUrl={nowPlaying?.artwork_url}
               size={36}
-              radius={10}
+              radius={9}
             />
           ) : (
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--app-panel2)', flex: 'none' }} />
-          )}
-          <CollapsedInfo status={status} currentChannel={currentChannel} nowPlaying={nowPlaying} errorMessage={errorMessage} isBuffering={isBuffering} />
-          <Waveform active={status === 'playing'} bands={4} size="sm" />
+            <ArtPlaceholder size={36} radius={9} />
+          ))}
+          <CollapsedInfo status={status} currentChannel={currentChannel} nowPlaying={nowPlaying} errorMessage={errorMessage} isBuffering={isBuffering} options={options} />
+          {options.showVisualizer && <Waveform active={status === 'playing'} bands={4} size="sm" tint={RAIL_TINT} />}
         </div>
       </>
     );
   }
+
+  const showBitrate = options.showBitrate && bitrateKbps != null && bitrateKbps > 0;
 
   return (
     <>
@@ -689,9 +738,10 @@ export function TransportBar({
         className="apogee-glass apogee-transport-surface"
         data-tauri-drag-region
         style={{
+          ...tintVars,
           display: 'flex',
           alignItems: 'center',
-          gap: 16,
+          gap: 14,
           width: '100%',
           height: '100%',
           boxSizing: 'border-box',
@@ -708,17 +758,19 @@ export function TransportBar({
           nowPlaying={nowPlaying}
           errorMessage={errorMessage}
           onArtworkClick={isMiniPlayer ? undefined : setExpandedArtwork}
+          options={options}
         />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 'none' }}>
           {currentChannel && status !== 'loading' && status !== 'error' && (
             <>
-              <CutTypeBadge cutType={nowPlaying?.cut_type} />
+              {options.showCutType && <CutTypeBadge cutType={nowPlaying?.cut_type} />}
+              {showBitrate && <span style={bitratePillStyle}>{bitrateKbps} kbps</span>}
               {isBuffering && status === 'playing' && (
                 <Text size="xs" c="orange" style={{ flex: 'none' }} title="Buffering">
                   ● Buffering
                 </Text>
               )}
-              <Waveform active={status === 'playing'} />
+              {options.showVisualizer && <Waveform active={status === 'playing'} tint={RAIL_TINT} />}
             </>
           )}
           <VolumeControl volume={volume} onChange={onVolumeChange} compact={compactVolumePopover} muted={muted} onToggleMute={onToggleMute} />

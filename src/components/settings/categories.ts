@@ -1,6 +1,7 @@
 export type SettingsCategoryId =
   | 'connection'
   | 'appearance'
+  | 'playbackBar'
   | 'audio'
   | 'discord'
   | 'scrobbling'
@@ -18,6 +19,8 @@ export interface SettingsCategory {
    *  wipe live credentials and the channel-group selection with no undo, About because there
    *  is nothing on the page that's a setting. */
   hideReset?: boolean;
+  /** Shown indented under the item before it in the settings rail, as its child page. */
+  nested?: boolean;
 }
 
 export const SETTINGS_CATEGORIES: SettingsCategory[] = [
@@ -29,6 +32,7 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     hideReset: true,
   },
   { id: 'appearance', label: 'Appearance', title: 'Appearance', hint: 'Changes apply as you make them.' },
+  { id: 'playbackBar', label: 'Playback Bar', title: 'Playback Bar', hint: 'Changes apply as you make them.', nested: true },
   {
     id: 'audio',
     label: 'Audio',
