@@ -137,11 +137,15 @@ body,
   overflow: hidden;
   /* Overrides .apogee-glass's flat shadow with a layered one (tight contact
      shadow + soft ambient falloff) that fully fades out within
-     RAIL_SHADOW_GUTTER (see App.tsx) instead of getting hard-clipped by the
-     transparent window's edge. Reads as the rail floating above whatever is
-     beneath it rather than a shadow with a visible cutoff. */
+     RAIL_SHADOW_GUTTER in the full window (see App.tsx). */
   box-shadow: var(--app-shadow-rail), inset 0 1px 0 var(--app-glass-highlight);
   transition: border-radius 180ms ease, box-shadow 180ms ease, --rail-tint-a 400ms ease, --rail-tint-b 400ms ease;
+}
+
+/* Mini-player windows fit the visible rail exactly. Keep the inner highlight
+   without an outer shadow that would be clipped against the window bounds. */
+#apogee-window[data-mini-player] .apogee-transport-surface {
+  box-shadow: inset 0 1px 0 var(--app-glass-highlight);
 }
 
 .apogee-transport-surface::before {

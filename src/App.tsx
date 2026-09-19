@@ -64,17 +64,11 @@ const NAV_ITEMS: { page: Page; label: string; icon: typeof IconHome2 }[] = [
 const COMPACT_BREAKPOINT = 900;
 const CARD_WIDTH = 1180;
 const CARD_HEIGHT = 760;
+// Shadow space belongs only to the full window. Standalone players must have
+// native bounds that match the visible rail so they can reach screen edges.
 const RAIL_SHADOW_GUTTER = 24;
 const EXPANDED_RAIL_SIZE = { width: 560, height: 84 };
 const COLLAPSED_RAIL_SIZE = { width: 260, height: 56 };
-const EXPANDED_BAR_SIZE = {
-  width: EXPANDED_RAIL_SIZE.width + RAIL_SHADOW_GUTTER * 2,
-  height: EXPANDED_RAIL_SIZE.height + RAIL_SHADOW_GUTTER * 2,
-};
-const COLLAPSED_BAR_SIZE = {
-  width: COLLAPSED_RAIL_SIZE.width + RAIL_SHADOW_GUTTER * 2,
-  height: COLLAPSED_RAIL_SIZE.height + RAIL_SHADOW_GUTTER * 2,
-};
 /** Align the expanded rail's center with the browser card's bottom edge. */
 const BAR_OVERLAP = EXPANDED_RAIL_SIZE.height / 2 + RAIL_SHADOW_GUTTER;
 
@@ -102,6 +96,7 @@ const LASTFM_PROVIDER_CLIENT: ScrobbleProviderClient = {
 async function applyWindowState(
   browserOpen: boolean,
   barMode: BarMode,
+  previousBrowserOpen: boolean,
   overridePosition?: PhysicalPosition | null,
 ) {
   const win = getCurrentWebviewWindow();
@@ -112,8 +107,8 @@ async function applyWindowState(
   const target = browserOpen
     ? { width: CARD_WIDTH, height: CARD_HEIGHT + BAR_OVERLAP, resizable: true, alwaysOnTop: false }
     : barMode === 'expanded'
-      ? { ...EXPANDED_BAR_SIZE, resizable: false, alwaysOnTop: keepMiniWindowOnTop }
-      : { ...COLLAPSED_BAR_SIZE, resizable: false, alwaysOnTop: keepMiniWindowOnTop };
+      ? { ...EXPANDED_RAIL_SIZE, resizable: false, alwaysOnTop: keepMiniWindowOnTop }
+      : { ...COLLAPSED_RAIL_SIZE, resizable: false, alwaysOnTop: keepMiniWindowOnTop };
 
   const width = Math.round(target.width * scale);
   const height = Math.round(target.height * scale);
@@ -129,9 +124,11 @@ async function applyWindowState(
     win.outerSize(),
   ]);
   const anchorX = currentPosition.x + currentSize.width / 2;
-  const anchorY = currentPosition.y + currentSize.height;
+  const previousGutter = previousBrowserOpen ? RAIL_SHADOW_GUTTER * scale : 0;
+  const targetGutter = browserOpen ? RAIL_SHADOW_GUTTER * scale : 0;
+  const anchorY = currentPosition.y + currentSize.height - previousGutter;
   let x = Math.round(anchorX - width / 2);
-  let y = Math.round(anchorY - height);
+  let y = Math.round(anchorY - height + targetGutter);
 
   if (monitor) {
     const area = monitor.workArea;
@@ -451,14 +448,11 @@ function AppContent() {
     }
   }, [playerStatus, currentChannel, currentNowPlaying, settings.discordRpcEnabled]);
 
-  useEffect(() => {
-    void applyWindowState(browserOpen, barMode);
-  }, [browserOpen, barMode, settings.keepMiniWindowOnTop]);
-
   const windowStateRef = useRef({ browserOpen, barMode });
   useEffect(() => {
+    void applyWindowState(browserOpen, barMode, windowStateRef.current.browserOpen);
     windowStateRef.current = { browserOpen, barMode };
-  }, [browserOpen, barMode]);
+  }, [browserOpen, barMode, settings.keepMiniWindowOnTop]);
 
   const wasMinimizedRef = useRef(false);
   const lastKnownPositionRef = useRef<PhysicalPosition | null>(null);
@@ -497,7 +491,7 @@ function AppContent() {
         wasMinimizedRef.current = minimized;
         if (!focused || minimized || !wasMinimized) return;
         const { browserOpen, barMode } = windowStateRef.current;
-        void applyWindowState(browserOpen, barMode, lastKnownPositionRef.current);
+        void applyWindowState(browserOpen, barMode, browserOpen, lastKnownPositionRef.current);
       })
       .then((fn) => {
         unlistenFocus = fn;
@@ -540,6 +534,7 @@ function AppContent() {
   return (
     <div
       id="apogee-window"
+      data-mini-player={!browserOpen || undefined}
       style={{
         position: 'relative',
         width: '100%',
@@ -705,7 +700,7 @@ function AppContent() {
           style={{
             position: 'absolute',
             left: '50%',
-            bottom: RAIL_SHADOW_GUTTER,
+            bottom: browserOpen ? RAIL_SHADOW_GUTTER : 0,
             width: barMode === 'expanded' ? EXPANDED_RAIL_SIZE.width : COLLAPSED_RAIL_SIZE.width,
             height: barMode === 'expanded' ? EXPANDED_RAIL_SIZE.height : COLLAPSED_RAIL_SIZE.height,
             transform: 'translateX(-50%)',
