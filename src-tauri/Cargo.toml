@@ -33,7 +33,7 @@ log = "=0.4.34"
 tauri = { version = "=2.11.5", features = ["macos-private-api"] }
 tauri-plugin-log = "=2.9.1"
 tauri-plugin-dialog = "=2.7.3"
-tauri-plugin-store = "=2.4.4"
+tauri-plugin-store = "=2.4.5"
 tauri-plugin-updater = "=2.11.0"
 tauri-plugin-process = "=2.3.1"
 tauri-plugin-opener = "=2.5.5"
