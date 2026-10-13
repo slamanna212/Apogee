@@ -6,7 +6,7 @@ rust-version = "1.95"
 publish = false
 
 [dependencies]
-broadcast-common = { version = "=9.3.0", default-features = false }
+broadcast-common = { version = "=9.4.0", default-features = false }
 hls-runtime = { version = "=0.6.0", default-features = false }
 transmux = { version = "=0.24.1", default-features = false }
 container-probe = { version = "=0.1.0", default-features = false }
